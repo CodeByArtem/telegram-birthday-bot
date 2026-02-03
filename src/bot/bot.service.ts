@@ -22,8 +22,8 @@ export class BotService implements OnModuleInit {
   private adminUsernames: string[];
 
   constructor(
-    private readonly configService: ConfigService,
-    private readonly peopleService: PeopleService,
+      private readonly configService: ConfigService,
+      private readonly peopleService: PeopleService,
   ) {}
 
   /**
@@ -126,14 +126,14 @@ export class BotService implements OnModuleInit {
     this.bot.onText(/\/birthdays/, (msg) => {
       const chatId = msg.chat.id;
       const people = this.peopleService.getAllPeople();
-      
+
       if (people.length === 0) {
         this.bot.sendMessage(chatId, '📭 Список дней рождения пуст');
         return;
       }
 
       let message = '🎂 Список дней рождения:\n\n';
-      
+
       people.forEach(person => {
         const age = this.peopleService.getPersonAge(person);
         // Всегда используем @username если есть, иначе просто имя
@@ -148,14 +148,14 @@ export class BotService implements OnModuleInit {
     this.bot.onText(/\/today/, (msg) => {
       const chatId = msg.chat.id;
       const birthdayPeople = this.peopleService.getPeopleWithBirthdayToday();
-      
+
       if (birthdayPeople.length === 0) {
         this.bot.sendMessage(chatId, '🎈 Сегодня нет именинников');
         return;
       }
 
       let message = '🎉 Сегодняшние именинники:\n\n';
-      
+
       birthdayPeople.forEach(person => {
         const age = this.peopleService.getPersonAge(person);
         // Всегда используем @username если есть, иначе просто имя
@@ -171,26 +171,26 @@ export class BotService implements OnModuleInit {
     this.bot.onText(/\/stats/, async (msg) => {
       const chatId = msg.chat.id;
       const stats = this.peopleService.getBirthdayStats();
-      
-      const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
-                     'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-      
+
+      const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+        'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+
       const currentMonth = months[dayjs().month()];
       const nextMonth = months[dayjs().add(1, 'month').month()];
-      
+
       let message = `📊 Статистика дней рождения:\n\n`;
       message += `👥 Всего людей: ${stats.total}\n`;
       message += `🎂 В этом месяце (${currentMonth}): ${stats.thisMonth}\n`;
       message += `🎈 В следующем месяце (${nextMonth}): ${stats.nextMonth}\n`;
       message += `📈 В среднем в месяц: ${stats.averagePerMonth}\n\n`;
-      
+
       message += `📅 По месяцам:\n`;
       stats.monthlyStats.forEach(stat => {
         if (stat.count > 0) {
           message += `${months[stat.month - 1]}: ${stat.count}\n`;
         }
       });
-      
+
       await this.bot.sendMessage(chatId, message);
     });
 
@@ -199,9 +199,21 @@ export class BotService implements OnModuleInit {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
+      // 🐛 ОТЛАДКА: логируем информацию о пользователе
+      this.logger.log(`🔍 Попытка выполнить команду /add:`);
+      this.logger.log(`   👤 Username из сообщения: "${username}"`);
+      this.logger.log(`   📋 Список админов: ${JSON.stringify(this.adminUsernames)}`);
+      this.logger.log(`   ✅ Является админом: ${this.isAdmin(username)}`);
+
       // Проверка прав админа
       if (!this.isAdmin(username)) {
-        this.bot.sendMessage(chatId, '❌ Только администратор может добавлять дни рождения!');
+        // Отправляем детальную информацию для отладки
+        this.bot.sendMessage(chatId,
+            `❌ Только администратор может добавлять дни рождения!\n\n` +
+            `🔍 Отладка:\n` +
+            `Ваш username: ${username || 'не установлен'}\n` +
+            `Список админов: ${this.adminUsernames.join(', ')}`
+        );
         return;
       }
 
@@ -234,11 +246,11 @@ export class BotService implements OnModuleInit {
 
       try {
         const person = await this.peopleService.addPersonFromTelegramWithValidation(
-          telegramUsername.replace('@', ''), // Имя = username без @
-          birthDate, 
-          telegramUsername,
-          this.bot,
-          chatId.toString()
+            telegramUsername.replace('@', ''), // Имя = username без @
+            birthDate,
+            telegramUsername,
+            this.bot,
+            chatId.toString()
         );
         const mention = telegramUsername ? `@${telegramUsername}` : telegramUsername;
         this.bot.sendMessage(chatId, `✅ ${mention} добавлен в список дней рождения! 🎂`);
@@ -252,9 +264,19 @@ export class BotService implements OnModuleInit {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
+      // 🐛 ОТЛАДКА
+      this.logger.log(`🔍 Попытка выполнить команду /remove:`);
+      this.logger.log(`   👤 Username: "${username}"`);
+      this.logger.log(`   ✅ Является админом: ${this.isAdmin(username)}`);
+
       // Проверка прав админа
       if (!this.isAdmin(username)) {
-        this.bot.sendMessage(chatId, '❌ Только администратор может удалять дни рождения!');
+        this.bot.sendMessage(chatId,
+            `❌ Только администратор может удалять дни рождения!\n\n` +
+            `🔍 Отладка:\n` +
+            `Ваш username: ${username || 'не установлен'}\n` +
+            `Список админов: ${this.adminUsernames.join(', ')}`
+        );
         return;
       }
 
@@ -267,10 +289,10 @@ export class BotService implements OnModuleInit {
 
       try {
         // Ищем человека по username
-        const person = this.peopleService.getAllPeople().find(p => 
-          p.telegramUsername?.toLowerCase() === targetUsername.toLowerCase()
+        const person = this.peopleService.getAllPeople().find(p =>
+            p.telegramUsername?.toLowerCase() === targetUsername.toLowerCase()
         );
-        
+
         if (!person) {
           this.bot.sendMessage(chatId, `❌ Пользователь @${targetUsername} не найден в списке дней рождения`);
           return;
@@ -300,9 +322,9 @@ export class BotService implements OnModuleInit {
   })
   async checkBirthdays() {
     this.logger.log('🕐 Запуск проверки дней рождения в 11:00');
-    
+
     const birthdayPeople = this.peopleService.getPeopleWithBirthdayToday();
-    
+
     if (birthdayPeople.length === 0) {
       this.logger.log('📭 Сегодня нет именинников');
       return;
@@ -321,7 +343,7 @@ export class BotService implements OnModuleInit {
     const age = this.peopleService.getPersonAge(person);
     // Всегда используем @username для упоминания, если есть
     const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
-    
+
     const congratulationsMessage = `
 🎉🎂🎊
 С днём рождения, ${mention}! 🥳
@@ -346,14 +368,14 @@ export class BotService implements OnModuleInit {
         'https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif',
         'https://media.giphy.com/media/3oFzmme8JFS1Y8wPqe/giphy.gif'
       ];
-      
+
       const randomImage = birthdayImages[Math.floor(Math.random() * birthdayImages.length)];
-      
+
       // Отправляем картинку
       await this.bot.sendPhoto(this.chatId, randomImage, {
         caption: congratulationsMessage
       });
-      
+
       this.logger.log(`✅ Поздравление отправлено: ${person.name} (@${person.telegramUsername || 'no username'})`);
     } catch (error) {
       // Если картинка не загрузилась, отправляем просто текст
