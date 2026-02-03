@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 const TelegramBot = require('node-telegram-bot-api');
+const dayjs = require('dayjs');
 import { PeopleService, Person } from '../people/people.service';
 
 /**
@@ -18,6 +19,7 @@ export class BotService implements OnModuleInit {
   private readonly logger = new Logger(BotService.name);
   private bot: any;
   private chatId: string;
+  private adminUsernames: string[];
 
   constructor(
     private readonly configService: ConfigService,
@@ -30,6 +32,7 @@ export class BotService implements OnModuleInit {
   async onModuleInit() {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     this.chatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
+    const admins = this.configService.get<string>('ADMIN_USERNAMES') || '';
 
     if (!token) {
       this.logger.error('❌ TELEGRAM_BOT_TOKEN не найден в переменных окружения');
@@ -41,6 +44,9 @@ export class BotService implements OnModuleInit {
       throw new Error('TELEGRAM_CHAT_ID обязателен');
     }
 
+    // Парсим админов
+    this.adminUsernames = admins.split(',').map(a => a.trim().toLowerCase());
+
     // Создаем экземпляр бота
     this.bot = new TelegramBot(token, { polling: true });
 
@@ -48,6 +54,15 @@ export class BotService implements OnModuleInit {
     this.setupHandlers();
 
     this.logger.log('✅ Telegram бот успешно инициализирован');
+    this.logger.log(`🔑 Админы: ${this.adminUsernames.join(', ')}`);
+  }
+
+  /**
+   * Проверить, является ли пользователь админом
+   */
+  private isAdmin(username?: string): boolean {
+    if (!username) return false;
+    return this.adminUsernames.includes(username.toLowerCase());
   }
 
   /**
@@ -67,6 +82,13 @@ export class BotService implements OnModuleInit {
 /help - Помощь
 /birthdays - Показать список всех дней рождения
 /today - Показать сегодняшние именинники
+/stats - Статистика дней рождения
+
+🔒 Админские команды (только для админов):
+/add ДД.ММ.ГГГГ @username - добавить день рождения
+/remove @username - удалить день рождения
+
+🎁 Поздравления теперь с картинками! 🎉
 
 🕐 Каждый день в 11:00 я проверяю список и поздравляю именинников!
       `.trim();
@@ -84,12 +106,17 @@ export class BotService implements OnModuleInit {
 /help - Эта справка
 /birthdays - Полный список дней рождения
 /today - Сегодняшние именинники
+/stats - Статистика дней рождения
 
-⏰ Автоматические поздравления:
-Каждый день в 11:00 я проверяю список и отправляю поздравления.
+🔒 Админские команды:
+/add ДД.ММ.ГГГГ @username - добавить день рождения  
+/remove @username - удалить день рождения
 
-🔧 Для администратора:
-Чтобы добавить или удалить человека, отредактируйте массив в файле people.service.ts
+🎁 Особенности:
+✅ Автоматические поздравления в 11:00
+✅ Поздравления с гифками и картинками
+✅ Упоминание через @username
+✅ Проверка участников чата
       `.trim();
 
       this.bot.sendMessage(chatId, helpMessage);
@@ -109,6 +136,7 @@ export class BotService implements OnModuleInit {
       
       people.forEach(person => {
         const age = this.peopleService.getPersonAge(person);
+        // Всегда используем @username если есть, иначе просто имя
         const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
         message += `👤 ${mention}\n📅 ${person.birthDate} (${age} лет)\n\n`;
       });
@@ -130,12 +158,131 @@ export class BotService implements OnModuleInit {
       
       birthdayPeople.forEach(person => {
         const age = this.peopleService.getPersonAge(person);
+        // Всегда используем @username если есть, иначе просто имя
         const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
         message += `🎂 ${mention} (${age} лет)!\n`;
       });
 
       message += '\n🎊 Поздравляем с днём рождения!';
       this.bot.sendMessage(chatId, message);
+    });
+
+    // Обработчик команды /stats
+    this.bot.onText(/\/stats/, async (msg) => {
+      const chatId = msg.chat.id;
+      const stats = this.peopleService.getBirthdayStats();
+      
+      const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                     'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+      
+      const currentMonth = months[dayjs().month()];
+      const nextMonth = months[dayjs().add(1, 'month').month()];
+      
+      let message = `📊 Статистика дней рождения:\n\n`;
+      message += `👥 Всего людей: ${stats.total}\n`;
+      message += `🎂 В этом месяце (${currentMonth}): ${stats.thisMonth}\n`;
+      message += `🎈 В следующем месяце (${nextMonth}): ${stats.nextMonth}\n`;
+      message += `📈 В среднем в месяц: ${stats.averagePerMonth}\n\n`;
+      
+      message += `📅 По месяцам:\n`;
+      stats.monthlyStats.forEach(stat => {
+        if (stat.count > 0) {
+          message += `${months[stat.month - 1]}: ${stat.count}\n`;
+        }
+      });
+      
+      await this.bot.sendMessage(chatId, message);
+    });
+
+    // Обработчик команды /add (только для админов)
+    this.bot.onText(/\/add (.+)/, async (msg, match) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      // Проверка прав админа
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может добавлять дни рождения!');
+        return;
+      }
+
+      if (!match) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ [@username]');
+        return;
+      }
+
+      const args = match[1].split(' ');
+      if (args.length < 1) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ [@username]');
+        return;
+      }
+
+      const birthDate = args[0];
+      const telegramUsername = args[1];
+
+      // Проверка формата даты
+      const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
+      if (!dateRegex.test(birthDate)) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ');
+        return;
+      }
+
+      // Если username не указан, просим ввести имя
+      if (!telegramUsername) {
+        this.bot.sendMessage(chatId, '❌ Укажите @username или имя. Используйте: /add ДД.ММ.ГГГГ @username');
+        return;
+      }
+
+      try {
+        const person = await this.peopleService.addPersonFromTelegramWithValidation(
+          telegramUsername.replace('@', ''), // Имя = username без @
+          birthDate, 
+          telegramUsername,
+          this.bot,
+          chatId.toString()
+        );
+        const mention = telegramUsername ? `@${telegramUsername}` : telegramUsername;
+        this.bot.sendMessage(chatId, `✅ ${mention} добавлен в список дней рождения! 🎂`);
+      } catch (error) {
+        this.bot.sendMessage(chatId, error.message);
+      }
+    });
+
+    // Обработчик команды /remove (только для админов)
+    this.bot.onText(/\/remove (.+)/, (msg, match) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      // Проверка прав админа
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может удалять дни рождения!');
+        return;
+      }
+
+      if (!match) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /remove @username');
+        return;
+      }
+
+      const targetUsername = match[1].trim().replace('@', ''); // Убираем @ если есть
+
+      try {
+        // Ищем человека по username
+        const person = this.peopleService.getAllPeople().find(p => 
+          p.telegramUsername?.toLowerCase() === targetUsername.toLowerCase()
+        );
+        
+        if (!person) {
+          this.bot.sendMessage(chatId, `❌ Пользователь @${targetUsername} не найден в списке дней рождения`);
+          return;
+        }
+
+        const success = this.peopleService.removePerson(person.id);
+        if (success) {
+          this.bot.sendMessage(chatId, `✅ @${targetUsername} удален из списка дней рождения!`);
+        }
+      } catch (error) {
+        this.bot.sendMessage(chatId, `❌ Ошибка при удалении: ${error.message}`);
+      }
     });
 
     // Обработчик ошибок
@@ -149,7 +296,7 @@ export class BotService implements OnModuleInit {
    */
   @Cron('0 11 * * *', {
     name: 'birthdayCheck',
-    timeZone: 'Europe/Moscow',
+    timeZone: 'Europe/Kyiv',
   })
   async checkBirthdays() {
     this.logger.log('🕐 Запуск проверки дней рождения в 11:00');
@@ -172,6 +319,7 @@ export class BotService implements OnModuleInit {
    */
   private async sendBirthdayCongratulations(person: Person) {
     const age = this.peopleService.getPersonAge(person);
+    // Всегда используем @username для упоминания, если есть
     const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
     
     const congratulationsMessage = `
@@ -190,10 +338,31 @@ export class BotService implements OnModuleInit {
     `.trim();
 
     try {
-      await this.bot.sendMessage(this.chatId, congratulationsMessage);
-      this.logger.log(`✅ Поздравление отправлено: ${person.name}`);
+      // Случайная картинка поздравления
+      const birthdayImages = [
+        'https://media.giphy.com/media/3o7TKUtmGfJWg1t0wA/giphy.gif',
+        'https://media.giphy.com/media/3o7aD5sa1j2oHcCJhi/giphy.gif',
+        'https://media.giphy.com/media/l4FGkXHbV1k1sD4Hu/giphy.gif',
+        'https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif',
+        'https://media.giphy.com/media/3oFzmme8JFS1Y8wPqe/giphy.gif'
+      ];
+      
+      const randomImage = birthdayImages[Math.floor(Math.random() * birthdayImages.length)];
+      
+      // Отправляем картинку
+      await this.bot.sendPhoto(this.chatId, randomImage, {
+        caption: congratulationsMessage
+      });
+      
+      this.logger.log(`✅ Поздравление отправлено: ${person.name} (@${person.telegramUsername || 'no username'})`);
     } catch (error) {
-      this.logger.error(`❌ Ошибка отправки поздравления для ${person.name}:`, error);
+      // Если картинка не загрузилась, отправляем просто текст
+      try {
+        await this.bot.sendMessage(this.chatId, congratulationsMessage);
+        this.logger.log(`✅ Поздравление отправлено (текст): ${person.name}`);
+      } catch (textError) {
+        this.logger.error(`❌ Ошибка отправки поздравления для ${person.name}:`, textError);
+      }
     }
   }
 
