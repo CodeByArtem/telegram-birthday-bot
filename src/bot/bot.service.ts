@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 const TelegramBot = require('node-telegram-bot-api');
-const dayjs = require('dayjs');
+import dayjs from 'dayjs';  // ✅ ИСПРАВЛЕНО: было const dayjs = require('dayjs')
 import { PeopleService, Person } from '../people/people.service';
 
 /**

@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+// Подключаем плагин для парсинга кастомных форматов
+dayjs.extend(customParseFormat);
 
 /**
  * Интерфейс человека с информацией о дне рождения
@@ -44,7 +48,7 @@ export class PeopleService {
     const today = dayjs();
 
     return this.people.filter(person => {
-      const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY');
+      const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY', true); // true = strict mode
       // Сравниваем только день и месяц
       return birthDate.date() === today.date() &&
           birthDate.month() === today.month();
@@ -92,8 +96,8 @@ export class PeopleService {
       throw new Error('❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ');
     }
 
-    // Проверка валидности даты
-    const parsedDate = dayjs(birthDate, 'DD.MM.YYYY');
+    // Проверка валидности даты с strict mode
+    const parsedDate = dayjs(birthDate, 'DD.MM.YYYY', true);
     if (!parsedDate.isValid()) {
       throw new Error('❌ Некорректная дата. Проверьте правильность даты.');
     }
@@ -159,12 +163,12 @@ export class PeopleService {
   getBirthdayStats() {
     const total = this.people.length;
     const thisMonth = this.people.filter(p => {
-      const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY');
+      const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY', true);
       return birthDate.month() === dayjs().month();
     }).length;
 
     const nextMonth = this.people.filter(p => {
-      const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY');
+      const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY', true);
       return birthDate.month() === dayjs().add(1, 'month').month();
     }).length;
 
@@ -172,7 +176,7 @@ export class PeopleService {
     const monthlyStats = Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
       count: this.people.filter(p => {
-        const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY');
+        const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY', true);
         return birthDate.month() === i;
       }).length
     }));
@@ -190,7 +194,7 @@ export class PeopleService {
    * Получить возраст человека
    */
   getPersonAge(person: Person): number {
-    const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY');
+    const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY', true);
     const today = dayjs();
     return today.diff(birthDate, 'year');
   }
