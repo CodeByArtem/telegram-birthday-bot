@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import dayjs from 'dayjs';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Подключаем плагин для парсинга кастомных форматов
 dayjs.extend(customParseFormat);
@@ -17,15 +19,71 @@ export interface Person {
 
 /**
  * Сервис для управления списком людей
- * Хранит людей в массиве (в будущем можно заменить на базу данных)
+ * Хранит людей в JSON файле для сохранения между перезапусками
  */
 @Injectable()
-export class PeopleService {
-  // Массив людей с днями рождения
-  private readonly people: Person[] = [
-    // Добавляйте людей сюда через команду /add в Telegram
-    // Формат: /add ДД.ММ.ГГГГ @username
-  ];
+export class PeopleService implements OnModuleInit {
+  private readonly logger = new Logger(PeopleService.name);
+  private people: Person[] = [];
+  private readonly dataFilePath = path.join(process.cwd(), 'data', 'birthdays.json');
+
+  /**
+   * Инициализация при запуске - загружаем данные из файла
+   */
+  async onModuleInit() {
+    await this.loadDataFromFile();
+    this.logger.log(`✅ Загружено ${this.people.length} записей из файла`);
+  }
+
+  /**
+   * Загрузить данные из JSON файла
+   */
+  private async loadDataFromFile(): Promise<void> {
+    try {
+      // Создаём папку data если её нет
+      const dataDir = path.dirname(this.dataFilePath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+        this.logger.log('📁 Создана папка data/');
+      }
+
+      // Проверяем существование файла
+      if (fs.existsSync(this.dataFilePath)) {
+        const fileContent = fs.readFileSync(this.dataFilePath, 'utf-8');
+        this.people = JSON.parse(fileContent);
+        this.logger.log(`📂 Данные загружены из ${this.dataFilePath}`);
+      } else {
+        // Создаём пустой файл
+        this.people = [];
+        await this.saveDataToFile();
+        this.logger.log(`📝 Создан новый файл ${this.dataFilePath}`);
+      }
+    } catch (error) {
+      this.logger.error(`❌ Ошибка загрузки данных: ${error.message}`);
+      this.people = [];
+    }
+  }
+
+  /**
+   * Сохранить данные в JSON файл
+   */
+  private async saveDataToFile(): Promise<void> {
+    try {
+      const dataDir = path.dirname(this.dataFilePath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+
+      fs.writeFileSync(
+          this.dataFilePath,
+          JSON.stringify(this.people, null, 2),
+          'utf-8'
+      );
+      this.logger.log(`💾 Данные сохранены в ${this.dataFilePath}`);
+    } catch (error) {
+      this.logger.error(`❌ Ошибка сохранения данных: ${error.message}`);
+    }
+  }
 
   /**
    * Получить всех людей
@@ -48,7 +106,7 @@ export class PeopleService {
     const today = dayjs();
 
     return this.people.filter(person => {
-      const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY', true); // true = strict mode
+      const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY', true);
       // Сравниваем только день и месяц
       return birthDate.date() === today.date() &&
           birthDate.month() === today.month();
@@ -58,23 +116,25 @@ export class PeopleService {
   /**
    * Добавить нового человека
    */
-  addPerson(person: Omit<Person, 'id'>): Person {
+  async addPerson(person: Omit<Person, 'id'>): Promise<Person> {
     const newPerson: Person = {
       ...person,
       id: this.people.length > 0 ? Math.max(...this.people.map(p => p.id)) + 1 : 1,
     };
 
     this.people.push(newPerson);
+    await this.saveDataToFile(); // ✅ Сохраняем в файл
     return newPerson;
   }
 
   /**
    * Удалить человека по ID
    */
-  removePerson(id: number): boolean {
+  async removePerson(id: number): Promise<boolean> {
     const index = this.people.findIndex(person => person.id === id);
     if (index !== -1) {
       this.people.splice(index, 1);
+      await this.saveDataToFile(); // ✅ Сохраняем в файл
       return true;
     }
     return false;
@@ -123,10 +183,7 @@ export class PeopleService {
       throw new Error(`❌ Пользователь @${cleanUsername} уже есть в списке дней рождения`);
     }
 
-    // Примечание: Telegram сам проверит существование пользователя при упоминании
-    // Если пользователя нет в чате, упоминание просто не будет кликабельным
-
-    return this.addPerson({
+    return await this.addPerson({
       name,
       birthDate,
       telegramUsername: cleanUsername,
@@ -136,7 +193,7 @@ export class PeopleService {
   /**
    * Удалить человека по имени
    */
-  removePersonByName(name: string): boolean {
+  async removePersonByName(name: string): Promise<boolean> {
     const person = this.people.find(p =>
         p.name.toLowerCase() === name.toLowerCase()
     );
@@ -145,7 +202,7 @@ export class PeopleService {
       throw new Error('❌ Человек не найден');
     }
 
-    return this.removePerson(person.id);
+    return await this.removePerson(person.id);
   }
 
   /**
