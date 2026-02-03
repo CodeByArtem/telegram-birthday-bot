@@ -42,12 +42,12 @@ export class PeopleService {
    */
   getPeopleWithBirthdayToday(): Person[] {
     const today = dayjs();
-    
+
     return this.people.filter(person => {
       const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY');
       // Сравниваем только день и месяц
-      return birthDate.date() === today.date() && 
-             birthDate.month() === today.month();
+      return birthDate.date() === today.date() &&
+          birthDate.month() === today.month();
     });
   }
 
@@ -57,9 +57,9 @@ export class PeopleService {
   addPerson(person: Omit<Person, 'id'>): Person {
     const newPerson: Person = {
       ...person,
-      id: Math.max(...this.people.map(p => p.id)) + 1,
+      id: this.people.length > 0 ? Math.max(...this.people.map(p => p.id)) + 1 : 1,
     };
-    
+
     this.people.push(newPerson);
     return newPerson;
   }
@@ -77,28 +77,14 @@ export class PeopleService {
   }
 
   /**
-   * Проверить, является ли пользователь участником чата
-   */
-  async validateChatMember(bot: any, chatId: string, username?: string): Promise<boolean> {
-    if (!username) return false;
-    
-    try {
-      const chatMember = await bot.getChatMember(chatId, username);
-      return ['member', 'administrator', 'creator'].includes(chatMember.status);
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
    * Добавить нового человека из Telegram команды с проверкой
    */
   async addPersonFromTelegramWithValidation(
-    name: string, 
-    birthDate: string, 
-    telegramUsername?: string,
-    bot?: any,
-    chatId?: string
+      name: string,
+      birthDate: string,
+      telegramUsername?: string,
+      bot?: any,
+      chatId?: string
   ): Promise<Person> {
     // Проверка формата даты
     const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
@@ -106,29 +92,40 @@ export class PeopleService {
       throw new Error('❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ');
     }
 
-    // Проверка на дубликаты
-    const exists = this.people.some(p => 
-      p.name.toLowerCase() === name.toLowerCase()
-    );
-    
-    if (exists) {
-      throw new Error('❌ Человек с таким именем уже существует');
+    // Проверка валидности даты
+    const parsedDate = dayjs(birthDate, 'DD.MM.YYYY');
+    if (!parsedDate.isValid()) {
+      throw new Error('❌ Некорректная дата. Проверьте правильность даты.');
     }
 
-    // Если указан username, проверяем что он в чате
-    if (telegramUsername && bot && chatId) {
-      const cleanUsername = telegramUsername.replace('@', '');
-      const isValidMember = await this.validateChatMember(bot, chatId, cleanUsername);
-      
-      if (!isValidMember) {
-        throw new Error(`❌ Пользователь @${cleanUsername} не найден в чате`);
-      }
+    // Проверка что username указан
+    if (!telegramUsername) {
+      throw new Error('❌ Необходимо указать @username пользователя Telegram');
     }
+
+    // Очищаем username от @
+    const cleanUsername = telegramUsername.replace('@', '').trim();
+
+    if (cleanUsername.length === 0) {
+      throw new Error('❌ Username не может быть пустым');
+    }
+
+    // Проверка на дубликаты по username (без учета регистра)
+    const exists = this.people.some(p =>
+        p.telegramUsername?.toLowerCase() === cleanUsername.toLowerCase()
+    );
+
+    if (exists) {
+      throw new Error(`❌ Пользователь @${cleanUsername} уже есть в списке дней рождения`);
+    }
+
+    // Примечание: Telegram сам проверит существование пользователя при упоминании
+    // Если пользователя нет в чате, упоминание просто не будет кликабельным
 
     return this.addPerson({
       name,
       birthDate,
-      telegramUsername: telegramUsername?.replace('@', ''),
+      telegramUsername: cleanUsername,
     });
   }
 
@@ -136,14 +133,14 @@ export class PeopleService {
    * Удалить человека по имени
    */
   removePersonByName(name: string): boolean {
-    const person = this.people.find(p => 
-      p.name.toLowerCase() === name.toLowerCase()
+    const person = this.people.find(p =>
+        p.name.toLowerCase() === name.toLowerCase()
     );
-    
+
     if (!person) {
       throw new Error('❌ Человек не найден');
     }
-    
+
     return this.removePerson(person.id);
   }
 
@@ -151,8 +148,8 @@ export class PeopleService {
    * Найти людей по имени (для поиска)
    */
   findPeopleByName(searchTerm: string): Person[] {
-    return this.people.filter(p => 
-      p.name.toLowerCase().includes(searchTerm.toLowerCase())
+    return this.people.filter(p =>
+        p.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }
 
@@ -165,7 +162,7 @@ export class PeopleService {
       const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY');
       return birthDate.month() === dayjs().month();
     }).length;
-    
+
     const nextMonth = this.people.filter(p => {
       const birthDate = dayjs(p.birthDate, 'DD.MM.YYYY');
       return birthDate.month() === dayjs().add(1, 'month').month();

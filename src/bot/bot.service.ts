@@ -66,6 +66,19 @@ export class BotService implements OnModuleInit {
   }
 
   /**
+   * Проверить, что пользователь есть в чате
+   */
+  private async isUserInChat(userId: number, chatId: string): Promise<boolean> {
+    try {
+      const member = await this.bot.getChatMember(chatId, userId);
+      return ['member', 'administrator', 'creator'].includes(member.status);
+    } catch (error) {
+      this.logger.error(`Ошибка проверки участника: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Настройка обработчиков команд бота
    */
   private setupHandlers() {
@@ -199,32 +212,22 @@ export class BotService implements OnModuleInit {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
-      // 🐛 ОТЛАДКА: логируем информацию о пользователе
-      this.logger.log(`🔍 Попытка выполнить команду /add:`);
-      this.logger.log(`   👤 Username из сообщения: "${username}"`);
-      this.logger.log(`   📋 Список админов: ${JSON.stringify(this.adminUsernames)}`);
-      this.logger.log(`   ✅ Является админом: ${this.isAdmin(username)}`);
-
       // Проверка прав админа
       if (!this.isAdmin(username)) {
-        // Отправляем детальную информацию для отладки
         this.bot.sendMessage(chatId,
-            `❌ Только администратор может добавлять дни рождения!\n\n` +
-            `🔍 Отладка:\n` +
-            `Ваш username: ${username || 'не установлен'}\n` +
-            `Список админов: ${this.adminUsernames.join(', ')}`
+            `❌ Только администратор может добавлять дни рождения!`
         );
         return;
       }
 
       if (!match) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ [@username]');
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ @username');
         return;
       }
 
       const args = match[1].split(' ');
-      if (args.length < 1) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ [@username]');
+      if (args.length < 2) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ @username');
         return;
       }
 
@@ -238,24 +241,31 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      // Если username не указан, просим ввести имя
-      if (!telegramUsername) {
-        this.bot.sendMessage(chatId, '❌ Укажите @username или имя. Используйте: /add ДД.ММ.ГГГГ @username');
+      // Проверка username
+      if (!telegramUsername || !telegramUsername.startsWith('@')) {
+        this.bot.sendMessage(chatId, '❌ Username должен начинаться с @. Пример: @username');
         return;
       }
 
       try {
         const person = await this.peopleService.addPersonFromTelegramWithValidation(
-            telegramUsername.replace('@', ''), // Имя = username без @
+            telegramUsername.replace('@', ''),
             birthDate,
             telegramUsername,
             this.bot,
             chatId.toString()
         );
-        const mention = telegramUsername ? `@${telegramUsername}` : telegramUsername;
-        this.bot.sendMessage(chatId, `✅ ${mention} добавлен в список дней рождения! 🎂`);
+
+        this.bot.sendMessage(chatId,
+            `✅ ${telegramUsername} добавлен в список дней рождения! 🎂\n\n` +
+            `📝 Проверьте, что упоминание ${telegramUsername} кликабельное (синего цвета).\n` +
+            `Если нет - пользователь не найден в чате или username указан неверно.`
+        );
+
+        this.logger.log(`✅ Добавлен пользователь: ${telegramUsername} (${birthDate})`);
       } catch (error) {
         this.bot.sendMessage(chatId, error.message);
+        this.logger.error(`❌ Ошибка добавления: ${error.message}`);
       }
     });
 
@@ -264,19 +274,9 @@ export class BotService implements OnModuleInit {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
-      // 🐛 ОТЛАДКА
-      this.logger.log(`🔍 Попытка выполнить команду /remove:`);
-      this.logger.log(`   👤 Username: "${username}"`);
-      this.logger.log(`   ✅ Является админом: ${this.isAdmin(username)}`);
-
       // Проверка прав админа
       if (!this.isAdmin(username)) {
-        this.bot.sendMessage(chatId,
-            `❌ Только администратор может удалять дни рождения!\n\n` +
-            `🔍 Отладка:\n` +
-            `Ваш username: ${username || 'не установлен'}\n` +
-            `Список админов: ${this.adminUsernames.join(', ')}`
-        );
+        this.bot.sendMessage(chatId, `❌ Только администратор может удалять дни рождения!`);
         return;
       }
 
@@ -285,7 +285,7 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      const targetUsername = match[1].trim().replace('@', ''); // Убираем @ если есть
+      const targetUsername = match[1].trim().replace('@', '');
 
       try {
         // Ищем человека по username
@@ -301,9 +301,11 @@ export class BotService implements OnModuleInit {
         const success = this.peopleService.removePerson(person.id);
         if (success) {
           this.bot.sendMessage(chatId, `✅ @${targetUsername} удален из списка дней рождения!`);
+          this.logger.log(`✅ Удален пользователь: @${targetUsername}`);
         }
       } catch (error) {
         this.bot.sendMessage(chatId, `❌ Ошибка при удалении: ${error.message}`);
+        this.logger.error(`❌ Ошибка удаления: ${error.message}`);
       }
     });
 
