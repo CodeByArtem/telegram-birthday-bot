@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BotModule } from './bot/bot.module';
 import { PeopleModule } from './people/people.module';
+import { HolidaysModule } from './holidays/holidays.module';
 
 /**
  * Корневой модуль приложения
@@ -23,6 +24,9 @@ import { PeopleModule } from './people/people.module';
     
     // Модуль управления людьми
     PeopleModule,
+    
+    // Модуль управления праздниками
+    HolidaysModule,
   ],
   controllers: [],
   providers: [],

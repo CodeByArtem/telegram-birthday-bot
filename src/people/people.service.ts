@@ -14,6 +14,7 @@ export interface Person {
   id: number;
   name: string;
   birthDate: string; // Формат: DD.MM.YYYY
+  gender?: 'male' | 'female'; // Пол: male/female (опционально)
   telegramUsername?: string; // Опционально, для упоминания в Telegram
 }
 
@@ -83,6 +84,13 @@ export class PeopleService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`❌ Ошибка сохранения данных: ${error.message}`);
     }
+  }
+
+  /**
+   * Публичный метод для сохранения данных (используется в BotService)
+   */
+  async saveData(): Promise<void> {
+    await this.saveDataToFile();
   }
 
   /**
@@ -254,5 +262,12 @@ export class PeopleService implements OnModuleInit {
     const birthDate = dayjs(person.birthDate, 'DD.MM.YYYY', true);
     const today = dayjs();
     return today.diff(birthDate, 'year');
+  }
+
+  /**
+   * Получить всех женщин из списка
+   */
+  getWomen(): Person[] {
+    return this.people.filter(person => person.gender === 'female');
   }
 }

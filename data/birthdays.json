@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "name": "Анна",
+    "birthDate": "08.03.1990",
+    "gender": "female",
+    "telegramUsername": "anna_username"
+  },
+  {
+    "id": 2,
+    "name": "Мария",
+    "birthDate": "15.07.1985",
+    "gender": "female",
+    "telegramUsername": "maria_username"
+  },
+  {
+    "id": 3,
+    "name": "Елена",
+    "birthDate": "22.12.1992",
+    "gender": "female",
+    "telegramUsername": "elena_username"
+  }
+]

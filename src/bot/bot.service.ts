@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 const TelegramBot = require('node-telegram-bot-api');
 import dayjs from 'dayjs';  // ✅ ИСПРАВЛЕНО: было const dayjs = require('dayjs')
 import { PeopleService, Person } from '../people/people.service';
+import { HolidaysService } from '../holidays/holidays.service';
 
 /**
  * Тип для Telegram бота
@@ -24,6 +25,7 @@ export class BotService implements OnModuleInit {
   constructor(
       private readonly configService: ConfigService,
       private readonly peopleService: PeopleService,
+      private readonly holidaysService: HolidaysService,
   ) {}
 
   /**
@@ -96,12 +98,14 @@ export class BotService implements OnModuleInit {
 /birthdays - Показать список всех дней рождения
 /today - Показать сегодняшние именинники
 /stats - Статистика дней рождения
+/women - Показать список женщин
 
 🔒 Админские команды (только для админов):
-/add ДД.ММ.ГГГГ @username - добавить день рождения
+/add ДД.ММ.ГГГГ @username [male|female] - добавить день рождения с указанием пола
 /remove @username - удалить день рождения
 
 🎁 Поздравления теперь с картинками! 🎉
+🌸 Автоматические поздравления с 8 марта! 🌺
 
 🕐 Каждый день в 11:00 я проверяю список и поздравляю именинников!
       `.trim();
@@ -120,9 +124,10 @@ export class BotService implements OnModuleInit {
 /birthdays - Полный список дней рождения
 /today - Сегодняшние именинники
 /stats - Статистика дней рождения
+/women - Список женщин в системе
 
 🔒 Админские команды:
-/add ДД.ММ.ГГГГ @username - добавить день рождения  
+/add ДД.ММ.ГГГГ @username [male|female] - добавить день рождения с указанием пола  
 /remove @username - удалить день рождения
 
 🎁 Особенности:
@@ -130,6 +135,7 @@ export class BotService implements OnModuleInit {
 ✅ Поздравления с гифками и картинками
 ✅ Упоминание через @username
 ✅ Проверка участников чата
+🌸 Автоматические поздравления с 8 марта!
       `.trim();
 
       this.bot.sendMessage(chatId, helpMessage);
@@ -207,6 +213,28 @@ export class BotService implements OnModuleInit {
       await this.bot.sendMessage(chatId, message);
     });
 
+    // Обработчик команды /women
+    this.bot.onText(/\/women/, (msg) => {
+      const chatId = msg.chat.id;
+      const allPeople = this.peopleService.getAllPeople();
+      const women = this.holidaysService.getWomen(allPeople);
+
+      if (women.length === 0) {
+        this.bot.sendMessage(chatId, '👭 В списке нет женщин');
+        return;
+      }
+
+      let message = '🌸🌺🌷 Женщины в списке:\n\n';
+
+      women.forEach(woman => {
+        const age = this.peopleService.getPersonAge(woman);
+        const mention = woman.telegramUsername ? `@${woman.telegramUsername}` : woman.name;
+        message += `🌺 ${mention}\n📅 ${woman.birthDate} (${age} лет)\n\n`;
+      });
+
+      this.bot.sendMessage(chatId, message);
+    });
+
     // Обработчик команды /add (только для админов)
     this.bot.onText(/\/add (.+)/, async (msg, match) => {
       const chatId = msg.chat.id;
@@ -221,18 +249,19 @@ export class BotService implements OnModuleInit {
       }
 
       if (!match) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ @username');
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ @username [male|female]');
         return;
       }
 
       const args = match[1].split(' ');
       if (args.length < 2) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ @username');
+        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: /add ДД.ММ.ГГГГ @username [male|female]');
         return;
       }
 
       const birthDate = args[0];
       const telegramUsername = args[1];
+      const gender = args[2] as 'male' | 'female' | undefined;
 
       // Проверка формата даты
       const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
@@ -247,6 +276,12 @@ export class BotService implements OnModuleInit {
         return;
       }
 
+      // Проверка пола если указан
+      if (gender && !['male', 'female'].includes(gender)) {
+        this.bot.sendMessage(chatId, '❌ Пол должен быть male или female');
+        return;
+      }
+
       try {
         const person = await this.peopleService.addPersonFromTelegramWithValidation(
             telegramUsername.replace('@', ''),
@@ -256,13 +291,20 @@ export class BotService implements OnModuleInit {
             chatId.toString()
         );
 
+        // Добавляем поле gender если указан
+        if (gender) {
+          person.gender = gender;
+          await this.peopleService.saveData();
+        }
+
+        const genderText = gender === 'female' ? '🌸 женщина' : gender === 'male' ? '👨 мужчина' : '';
         this.bot.sendMessage(chatId,
-            `✅ ${telegramUsername} добавлен в список дней рождения! 🎂\n\n` +
+            `✅ ${telegramUsername} добавлен в список дней рождения! ${genderText} 🎂\n\n` +
             `📝 Проверьте, что упоминание ${telegramUsername} кликабельное (синего цвета).\n` +
             `Если нет - пользователь не найден в чате или username указан неверно.`
         );
 
-        this.logger.log(`✅ Добавлен пользователь: ${telegramUsername} (${birthDate})`);
+        this.logger.log(`✅ Добавлен пользователь: ${telegramUsername} (${birthDate}) - ${gender || 'пол не указан'}`);
       } catch (error) {
         this.bot.sendMessage(chatId, error.message);
         this.logger.error(`❌ Ошибка добавления: ${error.message}`);
@@ -329,12 +371,62 @@ export class BotService implements OnModuleInit {
 
     if (birthdayPeople.length === 0) {
       this.logger.log('📭 Сегодня нет именинников');
+    } else {
+      // Отправляем поздравления
+      for (const person of birthdayPeople) {
+        await this.sendBirthdayCongratulations(person);
+      }
+    }
+
+    // Проверяем 8 марта
+    if (this.holidaysService.isInternationalWomensDay()) {
+      this.logger.log('🌸 Сегодня 8 марта - Международный женский день!');
+      await this.sendWomensDayCongratulations();
+    }
+  }
+
+  /**
+   * Отправить поздравления с 8 марта
+   */
+  private async sendWomensDayCongratulations() {
+    const allPeople = this.peopleService.getAllPeople();
+    const women = this.holidaysService.getWomen(allPeople);
+
+    if (women.length === 0) {
+      this.logger.log('👭 В списке нет женщин для поздравления');
       return;
     }
 
-    // Отправляем поздравления
-    for (const person of birthdayPeople) {
-      await this.sendBirthdayCongratulations(person);
+    this.logger.log(`🌸 Отправка поздравлений с 8 марта для ${women.length} женщин`);
+
+    for (const woman of women) {
+      await this.sendWomensDayMessage(woman);
+    }
+  }
+
+  /**
+   * Отправить поздравление с 8 марта одной женщине
+   */
+  private async sendWomensDayMessage(woman: Person) {
+    const message = this.holidaysService.getWomensDayMessage(woman);
+    const images = this.holidaysService.getWomensDayImages();
+    const randomImage = images[Math.floor(Math.random() * images.length)];
+
+    try {
+      // Отправляем картинку с поздравлением
+      await this.bot.sendPhoto(this.chatId, randomImage, {
+        caption: message
+      });
+
+      this.logger.log(`🌸 Поздравление с 8 марта отправлено: ${woman.name} (@${woman.telegramUsername || 'no username'})`);
+    } catch (error) {
+      // Если картинка не загрузилась, отправляем просто текст
+      try {
+        await this.bot.sendMessage(this.chatId, message);
+        this.logger.log(`🌸 Поздравление с 8 марта отправлено (текст): ${woman.name}`);
+      } catch (textError) {
+        this.logger.error(`❌ Ошибка отправки поздравления с 8 марта для ${woman.name}:`, textError);
+      }
     }
   }
 
