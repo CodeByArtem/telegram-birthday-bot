@@ -227,9 +227,8 @@ export class BotService implements OnModuleInit {
       let message = '🌸🌺🌷 Женщины в списке:\n\n';
 
       women.forEach(woman => {
-        const age = this.peopleService.getPersonAge(woman);
         const mention = woman.telegramUsername ? `@${woman.telegramUsername}` : woman.name;
-        message += `🌺 ${mention}\n📅 ${woman.birthDate} (${age} лет)\n\n`;
+        message += `🌺 ${mention}\n\n`;
       });
 
       this.bot.sendMessage(chatId, message);

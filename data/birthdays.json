@@ -1,23 +1,86 @@
 [
   {
     "id": 1,
-    "name": "Анна",
-    "birthDate": "08.03.1990",
+    "name": "Аня",
+    "birthDate": "15.06.1995",
     "gender": "female",
-    "telegramUsername": "anna_username"
+    "telegramUsername": "anja_939"
   },
   {
     "id": 2,
-    "name": "Мария",
-    "birthDate": "15.07.1985",
+    "name": "Наталья",
+    "birthDate": "10.05.1992",
     "gender": "female",
-    "telegramUsername": "maria_username"
+    "telegramUsername": "NataliaKalashnikova77"
   },
   {
     "id": 3,
-    "name": "Елена",
-    "birthDate": "22.12.1992",
+    "name": "Нелли",
+    "birthDate": "20.08.1990",
     "gender": "female",
-    "telegramUsername": "elena_username"
+    "telegramUsername": "Nelli_Diachkina"
+  },
+  {
+    "id": 4,
+    "name": "Леся",
+    "birthDate": "12.03.1993",
+    "gender": "female",
+    "telegramUsername": "Lesia_ssk"
+  },
+  {
+    "id": 5,
+    "name": "Фаина",
+    "birthDate": "25.11.1991",
+    "gender": "female",
+    "telegramUsername": "Faina_Velychko"
+  },
+  {
+    "id": 6,
+    "name": "Майя",
+    "birthDate": "18.07.1994",
+    "gender": "female",
+    "telegramUsername": "May_a_21"
+  },
+  {
+    "id": 7,
+    "name": "Мария",
+    "birthDate": "30.09.1989",
+    "gender": "female",
+    "telegramUsername": "mariia_1306"
+  },
+  {
+    "id": 8,
+    "name": "Камила",
+    "birthDate": "14.02.1996",
+    "gender": "female",
+    "telegramUsername": "kamila_lohvynenko"
+  },
+  {
+    "id": 9,
+    "name": "Юлия",
+    "birthDate": "08.12.1992",
+    "gender": "female",
+    "telegramUsername": "Ju_Shapiro"
+  },
+  {
+    "id": 10,
+    "name": "Инна",
+    "birthDate": "22.01.1990",
+    "gender": "female",
+    "telegramUsername": "I_n_n_a_VK"
+  },
+  {
+    "id": 11,
+    "name": "Вероника",
+    "birthDate": "16.06.1995",
+    "gender": "female",
+    "telegramUsername": "v_eritate"
+  },
+  {
+    "id": 12,
+    "name": "Хамала",
+    "birthDate": "03.09.1991",
+    "gender": "female",
+    "telegramUsername": "Khamala_R"
   }
 ]
