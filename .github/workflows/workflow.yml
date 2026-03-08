@@ -7,6 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@master
@@ -14,9 +15,10 @@ jobs:
           host: 130.61.253.163
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 20m
           script: |
             cd /opt/telegram-birthday-bot
             git pull origin main
             sudo docker-compose down
-            sudo docker-compose build --no-cache
+            sudo docker-compose build
             sudo docker-compose up -d
