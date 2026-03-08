@@ -32,21 +32,7 @@ export class HolidaysService {
   getWomensDayMessage(person: Person): string {
     const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
     
-    return `
-🌸🌺🌷🌹🌸🌺🌷🌹
-С 8 Марта, ${mention}! 🌷
-
-🌟 Ты — настоящая женщина!
-💫 Красивая, умная и сильная!
-🌺 Желаю тебе счастья, любви 
-   и гармонии во всём! 🌸
-
-✨ Пусть каждый день будет 
-   наполнен радостью и улыбками!
-🌷 Будь любимой и желанной! 🌹
-
-С праздником весны! 🌺🌸🌷
-    `.trim();
+    return `🌸 С 8 марта, ${mention}! 🌺`;
   }
 
   /**

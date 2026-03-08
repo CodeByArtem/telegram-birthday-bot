@@ -399,34 +399,20 @@ export class BotService implements OnModuleInit {
 
     this.logger.log(`🌸 Отправка поздравлений с 8 марта для ${women.length} женщин`);
 
-    for (const woman of women) {
-      await this.sendWomensDayMessage(woman);
-    }
-  }
-
-  /**
-   * Отправить поздравление с 8 марта одной женщине
-   */
-  private async sendWomensDayMessage(woman: Person) {
-    const message = this.holidaysService.getWomensDayMessage(woman);
-    const images = this.holidaysService.getWomensDayImages();
-    const randomImage = images[Math.floor(Math.random() * images.length)];
+    // Создаем список всех женщин
+    let message = '🌸🌺🌷 С 8 марта! 🌷🌺🌸\n\n';
+    
+    women.forEach(woman => {
+      const mention = woman.telegramUsername ? `@${woman.telegramUsername}` : woman.name;
+      message += `${mention}\n`;
+    });
 
     try {
-      // Отправляем картинку с поздравлением
-      await this.bot.sendPhoto(this.chatId, randomImage, {
-        caption: message
-      });
-
-      this.logger.log(`🌸 Поздравление с 8 марта отправлено: ${woman.name} (@${woman.telegramUsername || 'no username'})`);
+      // Отправляем одно сообщение со списком всех женщин
+      await this.bot.sendMessage(this.chatId, message);
+      this.logger.log(`🌸 Поздравление с 8 марта отправлено для ${women.length} женщин`);
     } catch (error) {
-      // Если картинка не загрузилась, отправляем просто текст
-      try {
-        await this.bot.sendMessage(this.chatId, message);
-        this.logger.log(`🌸 Поздравление с 8 марта отправлено (текст): ${woman.name}`);
-      } catch (textError) {
-        this.logger.error(`❌ Ошибка отправки поздравления с 8 марта для ${woman.name}:`, textError);
-      }
+      this.logger.error(`❌ Ошибка отправки поздравления с 8 марта:`, error);
     }
   }
 
