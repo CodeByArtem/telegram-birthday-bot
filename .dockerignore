@@ -1,0 +1,27 @@
+# Логи
+logs/
+node_modules/
+dist/
+
+# Окружение
+.env
+.env.local
+.env.production
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Временные файлы
+*.tmp
+*.temp
+
+# SSH ключи (для безопасности не добавлять в образ)
+*.key
+*.key.pub
