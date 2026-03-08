@@ -4,11 +4,13 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
+import { GreetingStyle } from '../ai/ai.service';
 
 export interface HolidayImageData {
   name: string;
   recipientName?: string;
   prompt?: string;
+  style?: GreetingStyle;
 }
 
 @Injectable()
@@ -210,27 +212,28 @@ export class ImageService {
   }
 
   /**
-   * Резервное изображение — валидный PNG с праздничным цветом
+   * Резервное изображение — валидный PNG с цветом в зависимости от стиля
    */
   private getFallbackImage(holidayData: HolidayImageData): Buffer {
     try {
-      const fallbackPath = path.join(this.outputDir, `fallback-${holidayData.name}.png`);
+      const style = holidayData.style || 'friendly';
+      const fallbackPath = path.join(this.outputDir, `fallback-${holidayData.name}-${style}.png`);
       if (fs.existsSync(fallbackPath)) {
         const buf = fs.readFileSync(fallbackPath);
         if (this.isValidImage(buf)) return buf;
       }
     } catch (_) {}
 
-    this.logger.log('Создаём PNG-заглушку');
-    return this.createSolidColorPng(holidayData.name);
+    this.logger.log(`Создаём PNG-заглушку для стиля ${holidayData.style || 'default'}`);
+    return this.createSolidColorPng(holidayData.name, holidayData.style);
   }
 
   /**
-   * ✅ Создаёт настоящий валидный PNG (512x512, сплошной цвет)
+   * ✅ Создаёт настоящий валидный PNG (512x512, сплошной цвет) в зависимости от стиля
    * Использует только встроенный zlib — без сторонних зависимостей
    */
-  private createSolidColorPng(holidayName: string): Buffer {
-    const color = this.getHolidayColorRgb(holidayName);
+  private createSolidColorPng(holidayName: string, style?: string): Buffer {
+    const color = this.getHolidayStyleColorRgb(holidayName, style);
     const width = 512;
     const height = 512;
 
@@ -305,6 +308,45 @@ export class ImageService {
       table[n] = c;
     }
     return table;
+  }
+
+  private getHolidayStyleColorRgb(holidayName: string, style?: string): { r: number; g: number; b: number } {
+    const styleColors = {
+      '8 марта': {
+        'official': '#4A90E2',    // Синий официальный
+        'funny': '#FF69B4',      // Ярко-розовый веселый
+        'poetic': '#DDA0DD',     // Пастельный сиреневый
+        'friendly': '#FFB6C1',   // Теплый розовый
+        'romantic': '#FF1493'    // Глубокий розовый
+      },
+      'День рождения': {
+        'official': '#2E8B57',    // Темно-зеленый официальный
+        'funny': '#FFD700',      // Золотой веселый
+        'poetic': '#9370DB',     // Фиолетовый поэтический
+        'friendly': '#FFA500',   // Оранжевый дружеский
+        'romantic': '#FF69B4'    // Розовый романтичный
+      },
+      'Новый год': {
+        'official': '#2F4F4F',    // Темно-серый официальный
+        'funny': '#FF4500',      // Красно-оранжевый веселый
+        'poetic': '#4682B4',     // Стальной поэтический
+        'friendly': '#228B22',   // Зеленый дружеский
+        'romantic': '#DC143C'    // Алый романтичный
+      }
+    };
+
+    const holidayStyle = styleColors[holidayName]?.[style];
+    if (holidayStyle) {
+      const hex = holidayStyle.replace('#', '');
+      return {
+        r: parseInt(hex.substring(0, 2), 16),
+        g: parseInt(hex.substring(2, 4), 16),
+        b: parseInt(hex.substring(4, 6), 16),
+      };
+    }
+
+    // Фолбэк на обычные цвета
+    return this.getHolidayColorRgb(holidayName);
   }
 
   private getHolidayColor(holidayName: string): string {

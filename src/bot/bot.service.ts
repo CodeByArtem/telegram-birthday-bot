@@ -5,7 +5,7 @@ const TelegramBot = require('node-telegram-bot-api');
 import dayjs from 'dayjs';
 import { PeopleService, Person } from '../people/people.service';
 import { HolidaysService } from '../holidays/holidays.service';
-import { AiService } from '../ai/ai.service';
+import { AiService, GreetingStyle } from '../ai/ai.service';
 import { ImageService } from '../image/image.service';
 
 type TelegramBotInstance = InstanceType<typeof TelegramBot>;
@@ -335,6 +335,90 @@ export class BotService implements OnModuleInit {
       }
     });
 
+    this.bot.onText(/\/ai_style_official/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может выбирать стиль!');
+        return;
+      }
+
+      try {
+        await this.sendAiGeneratedGreeting({
+          name: 'День рождения',
+          style: GreetingStyle.OFFICIAL,
+        });
+        this.bot.sendMessage(chatId, '✅ Официальный стиль отправлен!');
+      } catch (error) {
+        this.logger.error('Ошибка генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка генерации, проверьте логи');
+      }
+    });
+
+    this.bot.onText(/\/ai_style_funny/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может выбирать стиль!');
+        return;
+      }
+
+      try {
+        await this.sendAiGeneratedGreeting({
+          name: 'День рождения',
+          style: GreetingStyle.FUNNY,
+        });
+        this.bot.sendMessage(chatId, '✅ Веселый стиль отправлен!');
+      } catch (error) {
+        this.logger.error('Ошибка генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка генерации, проверьте логи');
+      }
+    });
+
+    this.bot.onText(/\/ai_style_poetic/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может выбирать стиль!');
+        return;
+      }
+
+      try {
+        await this.sendAiGeneratedGreeting({
+          name: 'День рождения',
+          style: GreetingStyle.POETIC,
+        });
+        this.bot.sendMessage(chatId, '✅ Поэтический стиль отправлен!');
+      } catch (error) {
+        this.logger.error('Ошибка генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка генерации, проверьте логи');
+      }
+    });
+
+    this.bot.onText(/\/ai_style_romantic/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может выбирать стиль!');
+        return;
+      }
+
+      try {
+        await this.sendAiGeneratedGreeting({
+          name: 'День рождения',
+          style: GreetingStyle.ROMANTIC,
+        });
+        this.bot.sendMessage(chatId, '✅ Романтичный стиль отправлен!');
+      } catch (error) {
+        this.logger.error('Ошибка генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка генерации, проверьте логи');
+      }
+    });
+
     this.bot.onText(/\/ai_status/, async (msg) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
@@ -380,8 +464,14 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
 /add ДД.ММ.ГГГГ @username [male|female] - добавить пользователя
 /remove @username - удалить пользователя
 
+🎨 Стили поздравлений:
+/ai_style_official - официальный стиль
+/ai_style_funny - веселый стиль  
+/ai_style_poetic - поэтический стиль
+/ai_style_romantic - романтичный стиль
+
 🧪 Тестирование:
-/test_evening - тестировать поздравление 8 марта (картинка + AI текст + ники)
+/test_evening - тестировать поздравление 8 марта
 /ai_birthday @username - тестировать AI поздравление с днем рождения
 /ai_holiday [название] - тестировать AI поздравление с праздником
 /ai_status - проверить статус AI сервисов
@@ -547,7 +637,7 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
   }
 
   /**
-   * Cron: поздравление с 8 марта в 18:00
+   * Cron: поздравление с 8 марта в 18:00 с автоматическим выбором стиля
    */
   @Cron('0 18 8 3 *', {
     name: 'womensDayEvening',
@@ -571,13 +661,18 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
         .map(w => w.telegramUsername ? `@${w.telegramUsername}` : w.name)
         .join(', ');
 
-    // Генерируем AI поздравление (текст + картинка) с упоминанием всех женщин
+    // Автоматически выбираем стиль для 8 марта (нежные стили)
+    const smartStyle = this.aiService.getSmartStyle('8 марта');
+    
+    this.logger.log(`🎨 Выбран стиль "${smartStyle}" для поздравления с 8 марта`);
+
     try {
       await this.sendAiGeneratedGreeting({
         name: '8 марта',
         recipientName: mentions,
+        style: smartStyle,
       });
-      this.logger.log(`✅ Поздравление с 8 марта отправлено для ${women.length} женщин`);
+      this.logger.log(`✅ Поздравление с 8 марта отправлено для ${women.length} женщин (стиль: ${smartStyle})`);
     } catch (error) {
       this.logger.error('❌ Ошибка отправки поздравления с 8 марта:', error);
 
@@ -601,7 +696,7 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
   }
 
   /**
-   * AI поздравления с днем рождения каждому имениннику отдельно
+   * AI поздравления с днем рождения каждому имениннику отдельно с красивым выбором стиля
    */
   private async sendBirthdayAICongratulations() {
     this.logger.log('🎂 Запуск AI поздравления с днем рождения');
@@ -615,11 +710,23 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
 
     for (const person of birthdayPeople) {
       try {
+        // Автоматически выбираем красивый стиль на основе пола
+        const smartStyle = this.aiService.getSmartStyle('День рождения', {
+          gender: person.gender
+        });
+
+        this.logger.log(`🎨 Выбран стиль "${smartStyle}" для ${person.name} (${person.gender || 'пол не указан'})`);
+
         await this.sendAiGeneratedGreeting({
           name: 'День рождения',
           recipientName: person.telegramUsername ? `@${person.telegramUsername}` : person.name,
+          style: smartStyle,
+          recipientInfo: {
+            gender: person.gender
+          }
         });
-        this.logger.log(`🎂 AI поздравление с днем рождения отправлено для ${person.name}`);
+        
+        this.logger.log(`🎂 AI поздравление с днем рождения отправлено для ${person.name} (стиль: ${smartStyle})`);
       } catch (error) {
         this.logger.error(`❌ Ошибка AI поздравления для ${person.name}:`, error);
       }
@@ -678,7 +785,7 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
   /**
    * Отправка AI сгенерированного поздравления с изображением
    */
-  async sendAiGeneratedGreeting(holidayData: { name: string; recipientName?: string }): Promise<void> {
+  async sendAiGeneratedGreeting(holidayData: { name: string; recipientName?: string; style?: GreetingStyle; recipientInfo?: any }): Promise<void> {
     try {
       this.logger.log(`🤖 Начало AI генерации поздравления: ${holidayData.name}`);
 
@@ -699,6 +806,7 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
           name: holidayData.name,
           recipientName: holidayData.recipientName,
           prompt: prompt,
+          style: holidayData.style,
         });
         this.logger.log(`✅ Изображение сгенерировано, размер: ${imageBuffer.length} байт`);
       } catch (error) {
