@@ -13,9 +13,16 @@ export class HolidaysService {
    * Получить всех женщин из списка
    */
   getWomen(people: Person[]): Person[] {
-    return people.filter(person => 
-      person.gender === 'female'
-    );
+    this.logger.log(`🔍 Фильтрация ${people.length} людей для поиска женщин...`);
+    
+    const women = people.filter(person => {
+      const isWoman = person.gender === 'female';
+      this.logger.log(`👤 ${person.name} (@${person.telegramUsername || 'no username'}) - gender: ${person.gender} -> ${isWoman ? '✅ женщина' : '❌ не женщина'}`);
+      return isWoman;
+    });
+    
+    this.logger.log(`👭 Найдено женщин: ${women.length}`);
+    return women;
   }
 
   /**

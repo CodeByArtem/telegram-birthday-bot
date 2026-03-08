@@ -32,6 +32,9 @@ export class BotService implements OnModuleInit {
    * Инициализация бота при запуске модуля
    */
   async onModuleInit() {
+    // Добавляем задержку чтобы избежать конфликтов
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     this.chatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
     const admins = this.configService.get<string>('ADMIN_USERNAMES') || '';
@@ -49,8 +52,29 @@ export class BotService implements OnModuleInit {
     // Парсим админов
     this.adminUsernames = admins.split(',').map(a => a.trim().toLowerCase());
 
-    // Создаем экземпляр бота
-    this.bot = new TelegramBot(token, { polling: true });
+    try {
+      // Создаем экземпляр бота с опцией для очистки вебхуков
+      this.bot = new TelegramBot(token, { 
+        polling: true,
+        request: {
+          agentOptions: {
+            keepAlive: false
+          }
+        }
+      });
+
+      // Принудительно отменяем вебхуки
+      await this.bot.deleteWebHook();
+      this.logger.log('🔧 Вебхуки отменены, переключаемся на polling');
+    } catch (error) {
+      this.logger.error(`❌ Ошибка инициализации бота: ${error.message}`);
+      throw error;
+    }
+
+    // Логирование всех входящих сообщений для отладки
+    this.bot.on('message', (msg) => {
+      this.logger.log(`📨 Получено сообщение: ${msg.text || '(без текста)'} от @${msg.from?.username || 'no username'} в чате ${msg.chat.id}`);
+    });
 
     // Настраиваем обработчики команд
     this.setupHandlers();
@@ -245,13 +269,30 @@ export class BotService implements OnModuleInit {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
+      // Отладочная информация
+      this.logger.log(`🧪 Попытка выполнения /test_evening от @${username || 'no username'}`);
+      this.logger.log(`👑 Список админов: ${this.adminUsernames.join(', ')}`);
+      this.logger.log(`✅ Проверка админа: ${this.isAdmin(username)}`);
+
       // Проверка прав админа
       if (!this.isAdmin(username)) {
+        this.logger.log(`❌ Отказ в доступе для @${username}`);
         this.bot.sendMessage(chatId, '❌ Только администратор может тестировать поздравления!');
         return;
       }
 
       this.logger.log('🧪 Тестирование вечернего поздравления с 8 марта');
+      
+      // Дополнительная отладка
+      const allPeople = this.peopleService.getAllPeople();
+      const women = this.holidaysService.getWomen(allPeople);
+      this.logger.log(`👥 Всего людей в базе: ${allPeople.length}`);
+      this.logger.log(`👭 Женщин найдено: ${women.length}`);
+      
+      if (women.length > 0) {
+        this.logger.log(`🌸 Список женщин: ${women.map(w => w.telegramUsername || w.name).join(', ')}`);
+      }
+      
       await this.sendWomensDayEveningCongratulations();
       this.bot.sendMessage(chatId, '✅ Вечернее поздравление с 8 марта отправлено для теста!');
     });
@@ -289,6 +330,25 @@ export class BotService implements OnModuleInit {
       `.trim();
 
       this.bot.sendMessage(chatId, adminHelpMessage);
+    });
+
+    // Временная команда для отладки - показывает username
+    this.bot.onText(/\/whoami/, (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+      const firstName = msg.from?.first_name;
+      const userId = msg.from?.id;
+      
+      const debugInfo = `
+🔍 Debug информация:
+👤 Имя: ${firstName}
+🏷️ Username: @${username || 'не указан'}
+🆔 ID: ${userId}
+💬 Chat ID: ${chatId}
+👑 Админ?: ${this.isAdmin(username) ? 'Да' : 'Нет'}
+      `.trim();
+
+      this.bot.sendMessage(chatId, debugInfo);
     });
 
     // Обработчик команды /add (только для админов)
@@ -452,7 +512,10 @@ export class BotService implements OnModuleInit {
     this.logger.log('🌆 Запуск вечернего поздравления с 8 марта в 18:00');
 
     const allPeople = this.peopleService.getAllPeople();
+    this.logger.log(`👥 Загружено людей из базы: ${allPeople.length}`);
+    
     const women = this.holidaysService.getWomen(allPeople);
+    this.logger.log(`👭 Отфильтровано женщин: ${women.length}`);
 
     if (women.length === 0) {
       this.logger.log('👭 В списке нет женщин для вечернего поздравления');
@@ -460,9 +523,10 @@ export class BotService implements OnModuleInit {
     }
 
     this.logger.log(`🌸 Вечернее поздравление с 8 марта для ${women.length} женщин`);
+    this.logger.log(`🌸 Chat ID для отправки: ${this.chatId}`);
 
     // Красивое поздравление
-    const beautifulMessage = `
+    let beautifulMessage = `
 🌸✨🌺🌷🌹🌸✨🌺🌷🌹
 🌸✨ С 8 МАРТА, НАШИ ЛЮБИМЫЕ! ✨🌸
 🌺🌷🌹🌸✨🌺🌷🌹🌸✨
@@ -471,6 +535,17 @@ export class BotService implements OnModuleInit {
 Ваша красота освещает мир! ✨
 Ваша сила вдохновляет нас! 💪
 Ваша нежность согревает сердца! ❤️
+
+🌸 Сегодня поздравляем наших прекрасных женщин:
+    `.trim();
+
+    // Добавляем список всех женщин
+    women.forEach(woman => {
+      const mention = woman.telegramUsername ? `@${woman.telegramUsername}` : woman.name;
+      beautifulMessage += `\n🌺 ${mention}`;
+    });
+
+    beautifulMessage += `
 
 🌟 Пусть каждый ваш день будет наполнен:
    • Счастьем, что льется рекой 🌊
@@ -488,10 +563,18 @@ export class BotService implements OnModuleInit {
 С любовью и восхищением! 🌟
     `.trim();
 
-    // Красивая картинка для 8 марта
-    const beautifulImage = 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l4FGhGhS1NQh1s1qU/giphy.gif';
+    // Красивая картинка для 8 марта - несколько вариантов
+    const beautifulImages = [
+      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l4FGhGhS1NQh1s1qU/giphy.gif',
+      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7abKhOpu0NwenH3O/giphy.gif',
+      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7aD2saalBwwftBIY/giphy.gif',
+      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/f3Jr9knTqQc2A/giphy.gif'
+    ];
+    
+    const beautifulImage = beautifulImages[Math.floor(Math.random() * beautifulImages.length)];
 
     try {
+      this.logger.log('📸 Попытка отправки фото с поздравлением...');
       // Отправляем красивую картинку с поздравлением
       await this.bot.sendPhoto(this.chatId, beautifulImage, {
         caption: beautifulMessage
@@ -499,8 +582,10 @@ export class BotService implements OnModuleInit {
       
       this.logger.log(`🌸 Вечернее поздравление с 8 марта отправлено для ${women.length} женщин`);
     } catch (error) {
+      this.logger.error(`❌ Ошибка отправки фото: ${error.message}`);
       // Если картинка не загрузилась, отправляем просто текст
       try {
+        this.logger.log('📝 Попытка отправки текстового поздравления...');
         await this.bot.sendMessage(this.chatId, beautifulMessage);
         this.logger.log(`🌸 Вечернее поздравление с 8 марта отправлено (текст) для ${women.length} женщин`);
       } catch (textError) {
