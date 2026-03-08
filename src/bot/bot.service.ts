@@ -119,6 +119,7 @@ export class BotService implements OnModuleInit {
       const helpMessage = `
 📖 Справка по командам:
 
+📋 Основные команды:
 /start - Приветственное сообщение
 /help - Эта справка
 /birthdays - Полный список дней рождения
@@ -129,13 +130,18 @@ export class BotService implements OnModuleInit {
 🔒 Админские команды:
 /add ДД.ММ.ГГГГ @username [male|female] - добавить день рождения с указанием пола  
 /remove @username - удалить день рождения
+/test_evening - тестировать вечернее поздравление 8 марта
+/help_admin - полная админская справка
 
 🎁 Особенности:
 ✅ Автоматические поздравления в 11:00
-✅ Поздравления с гифками и картинками
-✅ Упоминание через @username
-✅ Проверка участников чата
-🌸 Автоматические поздравления с 8 марта!
+🌸 Особое поздравление 8 марта в 18:00
+📱 Красивые поздравления с картинками
+🎂 Поздравления с возрастом и красивыми пожеланиями
+
+⏰ Время отправки:
+• 11:00 - дни рождения
+• 18:00 - вечернее поздравление 8 марта (только 8 марта)
       `.trim();
 
       this.bot.sendMessage(chatId, helpMessage);
@@ -232,6 +238,57 @@ export class BotService implements OnModuleInit {
       });
 
       this.bot.sendMessage(chatId, message);
+    });
+
+    // Обработчик команды /test_evening (только для админов)
+    this.bot.onText(/\/test_evening/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      // Проверка прав админа
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может тестировать поздравления!');
+        return;
+      }
+
+      this.logger.log('🧪 Тестирование вечернего поздравления с 8 марта');
+      await this.sendWomensDayEveningCongratulations();
+      this.bot.sendMessage(chatId, '✅ Вечернее поздравление с 8 марта отправлено для теста!');
+    });
+
+    // Обработчик команды /help_admin (только для админов)
+    this.bot.onText(/\/help_admin/, (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      // Проверка прав админа
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может видеть эту справку!');
+        return;
+      }
+
+      const adminHelpMessage = `
+🔧 Админские команды:
+
+📋 Управление:
+/add ДД.ММ.ГГГГ @username [male|female] - добавить пользователя
+/remove @username - удалить пользователя
+
+🧪 Тестирование:
+/test_evening - тестировать вечернее поздравление 8 марта
+
+📊 Статистика:
+/birthdays - все дни рождения
+/women - список женщин
+/stats - статистика
+/today - сегодняшние именинники
+
+⏰ Время отправки:
+• 11:00 - дни рождения
+• 18:00 - вечернее поздравление 8 марта (только 8 марта)
+      `.trim();
+
+      this.bot.sendMessage(chatId, adminHelpMessage);
     });
 
     // Обработчик команды /add (только для админов)
@@ -377,10 +434,78 @@ export class BotService implements OnModuleInit {
       }
     }
 
-    // Проверяем 8 марта
+    // Проверяем 8 марта - только вечернее поздравление
     if (this.holidaysService.isInternationalWomensDay()) {
-      this.logger.log('🌸 Сегодня 8 марта - Международный женский день!');
-      await this.sendWomensDayCongratulations();
+      this.logger.log('🌸 Сегодня 8 марта - вечернее поздравление в 18:00!');
+      // Утреннее поздравление отключено
+    }
+  }
+
+  /**
+   * Cron задача для красивого поздравления с 8 марта в 18:00
+   */
+  @Cron('0 18 8 3 *', {
+    name: 'womensDayEvening',
+    timeZone: 'Europe/Kyiv',
+  })
+  async sendWomensDayEveningCongratulations() {
+    this.logger.log('🌆 Запуск вечернего поздравления с 8 марта в 18:00');
+
+    const allPeople = this.peopleService.getAllPeople();
+    const women = this.holidaysService.getWomen(allPeople);
+
+    if (women.length === 0) {
+      this.logger.log('👭 В списке нет женщин для вечернего поздравления');
+      return;
+    }
+
+    this.logger.log(`🌸 Вечернее поздравление с 8 марта для ${women.length} женщин`);
+
+    // Красивое поздравление
+    const beautifulMessage = `
+🌸✨🌺🌷🌹🌸✨🌺🌷🌹
+🌸✨ С 8 МАРТА, НАШИ ЛЮБИМЫЕ! ✨🌸
+🌺🌷🌹🌸✨🌺🌷🌹🌸✨
+
+Вы — настоящие королевы этого дня! 👑
+Ваша красота освещает мир! ✨
+Ваша сила вдохновляет нас! 💪
+Ваша нежность согревает сердца! ❤️
+
+🌟 Пусть каждый ваш день будет наполнен:
+   • Счастьем, что льется рекой 🌊
+   • Любовью, что окрыляет 🕊️
+   • Успехом во всех начинаниях 🎯
+   • Радостью и улыбками 😊
+
+🌺 Вы заслуживаете самого лучшего!
+🌷 Будьте всегда любимы и желанны!
+🌹 Пусть мечты сбываются мгновенно!
+
+💖 С праздником весны, наши дорогие женщины! 💖
+🌸✨🌺🌷🌹🌸✨🌺🌷🌹🌸✨
+
+С любовью и восхищением! 🌟
+    `.trim();
+
+    // Красивая картинка для 8 марта
+    const beautifulImage = 'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l4FGhGhS1NQh1s1qU/giphy.gif';
+
+    try {
+      // Отправляем красивую картинку с поздравлением
+      await this.bot.sendPhoto(this.chatId, beautifulImage, {
+        caption: beautifulMessage
+      });
+      
+      this.logger.log(`🌸 Вечернее поздравление с 8 марта отправлено для ${women.length} женщин`);
+    } catch (error) {
+      // Если картинка не загрузилась, отправляем просто текст
+      try {
+        await this.bot.sendMessage(this.chatId, beautifulMessage);
+        this.logger.log(`🌸 Вечернее поздравление с 8 марта отправлено (текст) для ${women.length} женщин`);
+      } catch (textError) {
+        this.logger.error(`❌ Ошибка отправки вечернего поздравления с 8 марта:`, textError);
+      }
     }
   }
 
