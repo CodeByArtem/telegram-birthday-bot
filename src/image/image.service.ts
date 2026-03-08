@@ -1,0 +1,346 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as zlib from 'zlib';
+
+export interface HolidayImageData {
+  name: string;
+  recipientName?: string;
+  prompt?: string;
+}
+
+@Injectable()
+export class ImageService {
+  private readonly logger = new Logger(ImageService.name);
+  private readonly outputDir = './generated-images';
+
+  constructor(private configService: ConfigService) {
+    if (!fs.existsSync(this.outputDir)) {
+      fs.mkdirSync(this.outputDir, { recursive: true });
+    }
+  }
+
+  /**
+   * Генерация изображения
+   */
+  async generateImage(holidayData: HolidayImageData): Promise<Buffer> {
+    try {
+      this.logger.log(`Генерация изображения для: ${holidayData.name}`);
+
+      // 1. Пробуем Pollinations AI (бесплатно)
+      try {
+        const imageBuffer = await this.generateWithPollinations(holidayData);
+        if (imageBuffer) {
+          this.logger.log('✅ Изображение сгенерировано через Pollinations');
+          return this.saveImage(imageBuffer, holidayData.name);
+        }
+      } catch (error) {
+        this.logger.warn('Pollinations API не сработал:', error.message);
+      }
+
+      // 2. Пробуем Replicate
+      try {
+        const imageBuffer = await this.generateWithReplicate(holidayData);
+        if (imageBuffer) {
+          this.logger.log('✅ Изображение сгенерировано через Replicate');
+          return this.saveImage(imageBuffer, holidayData.name);
+        }
+      } catch (error) {
+        this.logger.warn('Replicate API не сработал:', error.message);
+      }
+
+      // 3. Используем PNG-заглушку
+      this.logger.warn('Все API недоступны, используем PNG-заглушку');
+      return this.getFallbackImage(holidayData);
+
+    } catch (error) {
+      this.logger.error('Ошибка генерации изображения:', error);
+      return this.getFallbackImage(holidayData);
+    }
+  }
+
+  /**
+   * Генерация через Pollinations AI (бесплатно)
+   */
+  private async generateWithPollinations(holidayData: HolidayImageData): Promise<Buffer | null> {
+    const prompt = holidayData.prompt || this.getDefaultPrompt(holidayData);
+    const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt)
+        + '?width=512&height=512&nologo=true';
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        this.logger.log(`Pollinations попытка ${attempt}/3...`);
+
+        const response = await axios.get(url, {
+          responseType: 'arraybuffer',
+          timeout: 60000,
+          headers: { 'User-Agent': 'Telegram-Birthday-Bot/1.0' },
+        });
+
+        if (response.status !== 200 || !response.data) {
+          this.logger.warn(`Pollinations попытка ${attempt}: статус ${response.status}`);
+          continue;
+        }
+
+        const contentType = response.headers['content-type'] || '';
+        if (!contentType.includes('image/')) {
+          this.logger.warn(`Pollinations попытка ${attempt}: не изображение (${contentType})`);
+          continue;
+        }
+
+        const buffer = Buffer.from(response.data);
+        if (!this.isValidImage(buffer)) {
+          this.logger.warn(`Pollinations попытка ${attempt}: невалидный файл`);
+          continue;
+        }
+
+        return buffer;
+      } catch (error) {
+        this.logger.warn(`Pollinations ошибка (попытка ${attempt}): ${error.message}`);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Проверка что буфер является валидным изображением (PNG или JPEG)
+   */
+  private isValidImage(buffer: Buffer): boolean {
+    if (buffer.length < 8) return false;
+
+    // PNG: начинается с 89 50 4E 47 0D 0A 1A 0A
+    const isPng =
+        buffer[0] === 0x89 &&
+        buffer[1] === 0x50 &&
+        buffer[2] === 0x4e &&
+        buffer[3] === 0x47;
+
+    // JPEG: начинается с FF D8 FF
+    const isJpeg =
+        buffer[0] === 0xff &&
+        buffer[1] === 0xd8 &&
+        buffer[2] === 0xff;
+
+    return isPng || isJpeg;
+  }
+
+  /**
+   * Генерация через Replicate API
+   */
+  private async generateWithReplicate(holidayData: HolidayImageData): Promise<Buffer | null> {
+    try {
+      const apiKey = this.configService.get<string>('REPLICATE_API_TOKEN');
+      if (!apiKey) return null;
+
+      const prompt = holidayData.prompt || this.getDefaultPrompt(holidayData);
+
+      const response = await axios.post(
+          'https://api.replicate.com/v1/predictions',
+          {
+            version: 'ac732df83cea7fff18b8472768c88ad041fa750ff7682a21affe81863cbe77e465b',
+            input: {
+              prompt,
+              width: 512,
+              height: 512,
+              num_outputs: 1,
+              num_inference_steps: 25,
+              guidance_scale: 7.5,
+            },
+          },
+          {
+            headers: {
+              Authorization: `Token ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 60000,
+          }
+      );
+
+      if (response.data?.urls?.get) {
+        const getResult = await axios.get(response.data.urls.get, {
+          headers: { Authorization: `Token ${apiKey}` },
+          timeout: 120000,
+        });
+
+        if (getResult.data?.output?.length > 0) {
+          const imageUrl = getResult.data.output[0];
+          const imageResponse = await axios.get(imageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+          });
+          const buf = Buffer.from(imageResponse.data);
+          return this.isValidImage(buf) ? buf : null;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.warn('Replicate ошибка:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Сохранение изображения
+   */
+  private saveImage(imageBuffer: Buffer, holidayName: string): Buffer {
+    const filename = `${holidayName}-${Date.now()}.png`;
+    const filepath = path.join(this.outputDir, filename);
+    fs.writeFileSync(filepath, imageBuffer);
+    this.logger.log(`Изображение сохранено: ${filepath}`);
+    return imageBuffer;
+  }
+
+  /**
+   * Промпт по умолчанию
+   */
+  private getDefaultPrompt(holidayData: HolidayImageData): string {
+    const basePrompts = {
+      '8 марта': `beautiful spring flowers, International Women's Day, pink and purple colors, festive atmosphere, high quality, detailed`,
+      'Рождество': `Christmas tree, snow, winter wonderland, festive lights, warm colors, magical atmosphere, high quality`,
+      'День рождения': `birthday cake with candles, colorful balloons, celebration, festive atmosphere, bright colors, high quality`,
+    };
+    return basePrompts[holidayData.name] || `festive celebration, colorful design, high quality, detailed image`;
+  }
+
+  /**
+   * Резервное изображение — валидный PNG с праздничным цветом
+   */
+  private getFallbackImage(holidayData: HolidayImageData): Buffer {
+    try {
+      const fallbackPath = path.join(this.outputDir, `fallback-${holidayData.name}.png`);
+      if (fs.existsSync(fallbackPath)) {
+        const buf = fs.readFileSync(fallbackPath);
+        if (this.isValidImage(buf)) return buf;
+      }
+    } catch (_) {}
+
+    this.logger.log('Создаём PNG-заглушку');
+    return this.createSolidColorPng(holidayData.name);
+  }
+
+  /**
+   * ✅ Создаёт настоящий валидный PNG (512x512, сплошной цвет)
+   * Использует только встроенный zlib — без сторонних зависимостей
+   */
+  private createSolidColorPng(holidayName: string): Buffer {
+    const color = this.getHolidayColorRgb(holidayName);
+    const width = 512;
+    const height = 512;
+
+    // --- PNG signature ---
+    const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+    // --- IHDR chunk ---
+    const ihdrData = Buffer.alloc(13);
+    ihdrData.writeUInt32BE(width, 0);
+    ihdrData.writeUInt32BE(height, 4);
+    ihdrData[8] = 8;  // bit depth
+    ihdrData[9] = 2;  // color type: RGB
+    ihdrData[10] = 0; // compression
+    ihdrData[11] = 0; // filter
+    ihdrData[12] = 0; // interlace
+    const ihdr = this.buildPngChunk('IHDR', ihdrData);
+
+    // --- IDAT chunk (raw scanlines) ---
+    // Каждая строка: filter byte (0) + RGB пиксели
+    const rawData = Buffer.alloc(height * (1 + width * 3));
+    for (let y = 0; y < height; y++) {
+      const rowStart = y * (1 + width * 3);
+      rawData[rowStart] = 0; // filter type None
+      for (let x = 0; x < width; x++) {
+        const offset = rowStart + 1 + x * 3;
+        rawData[offset] = color.r;
+        rawData[offset + 1] = color.g;
+        rawData[offset + 2] = color.b;
+      }
+    }
+    const compressed = zlib.deflateSync(rawData);
+    const idat = this.buildPngChunk('IDAT', compressed);
+
+    // --- IEND chunk ---
+    const iend = this.buildPngChunk('IEND', Buffer.alloc(0));
+
+    return Buffer.concat([signature, ihdr, idat, iend]);
+  }
+
+  /**
+   * Сборка PNG чанка: длина + тип + данные + CRC32
+   */
+  private buildPngChunk(type: string, data: Buffer): Buffer {
+    const typeBuffer = Buffer.from(type, 'ascii');
+    const lengthBuffer = Buffer.alloc(4);
+    lengthBuffer.writeUInt32BE(data.length, 0);
+    const crc = this.crc32(Buffer.concat([typeBuffer, data]));
+    const crcBuffer = Buffer.alloc(4);
+    crcBuffer.writeUInt32BE(crc, 0);
+    return Buffer.concat([lengthBuffer, typeBuffer, data, crcBuffer]);
+  }
+
+  /**
+   * CRC32 для PNG чанков
+   */
+  private crc32(buf: Buffer): number {
+    const table = this.getCrc32Table();
+    let crc = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) {
+      crc = table[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  private getCrc32Table(): number[] {
+    const table: number[] = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) {
+        c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[n] = c;
+    }
+    return table;
+  }
+
+  private getHolidayColor(holidayName: string): string {
+    const colors = {
+      '8 марта': '#FF69B4',
+      'Рождество': '#228B22',
+      'День рождения': '#FFD700',
+    };
+    return colors[holidayName] || '#4169E1';
+  }
+
+  private getHolidayColorRgb(holidayName: string): { r: number; g: number; b: number } {
+    const hex = this.getHolidayColor(holidayName).replace('#', '');
+    return {
+      r: parseInt(hex.substring(0, 2), 16),
+      g: parseInt(hex.substring(2, 4), 16),
+      b: parseInt(hex.substring(4, 6), 16),
+    };
+  }
+
+  cleanupOldImages(): void {
+    try {
+      const files = fs.readdirSync(this.outputDir);
+      const now = Date.now();
+      const maxAge = 24 * 60 * 60 * 1000;
+
+      files.forEach(file => {
+        const filepath = path.join(this.outputDir, file);
+        const stats = fs.statSync(filepath);
+        if (now - stats.mtime.getTime() > maxAge) {
+          fs.unlinkSync(filepath);
+          this.logger.log(`Удален старый файл: ${file}`);
+        }
+      });
+    } catch (error) {
+      this.logger.error('Ошибка очистки старых изображений:', error);
+    }
+  }
+}

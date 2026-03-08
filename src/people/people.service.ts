@@ -270,4 +270,13 @@ export class PeopleService implements OnModuleInit {
   getWomen(): Person[] {
     return this.people.filter(person => person.gender === 'female');
   }
+
+  /**
+   * Получить человека по username
+   */
+  getPersonByUsername(username: string): Person | undefined {
+    return this.people.find(person => 
+      person.telegramUsername?.toLowerCase() === username.toLowerCase()
+    );
+  }
 }

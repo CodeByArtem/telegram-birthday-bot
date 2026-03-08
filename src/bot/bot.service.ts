@@ -2,19 +2,14 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 const TelegramBot = require('node-telegram-bot-api');
-import dayjs from 'dayjs';  // ✅ ИСПРАВЛЕНО: было const dayjs = require('dayjs')
+import dayjs from 'dayjs';
 import { PeopleService, Person } from '../people/people.service';
 import { HolidaysService } from '../holidays/holidays.service';
+import { AiService } from '../ai/ai.service';
+import { ImageService } from '../image/image.service';
 
-/**
- * Тип для Telegram бота
- */
 type TelegramBotInstance = InstanceType<typeof TelegramBot>;
 
-/**
- * Сервис Telegram бота
- * Отвечает за отправку сообщений и обработку команд
- */
 @Injectable()
 export class BotService implements OnModuleInit {
   private readonly logger = new Logger(BotService.name);
@@ -26,13 +21,11 @@ export class BotService implements OnModuleInit {
       private readonly configService: ConfigService,
       private readonly peopleService: PeopleService,
       private readonly holidaysService: HolidaysService,
+      private readonly aiService: AiService,
+      private readonly imageService: ImageService,
   ) {}
 
-  /**
-   * Инициализация бота при запуске модуля
-   */
   async onModuleInit() {
-    // Добавляем задержку чтобы избежать конфликтов
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
@@ -49,12 +42,10 @@ export class BotService implements OnModuleInit {
       throw new Error('TELEGRAM_CHAT_ID обязателен');
     }
 
-    // Парсим админов
     this.adminUsernames = admins.split(',').map(a => a.trim().toLowerCase());
 
     try {
-      // Создаем экземпляр бота с опцией для очистки вебхуков
-      this.bot = new TelegramBot(token, { 
+      this.bot = new TelegramBot(token, {
         polling: true,
         request: {
           agentOptions: {
@@ -63,7 +54,6 @@ export class BotService implements OnModuleInit {
         }
       });
 
-      // Принудительно отменяем вебхуки
       await this.bot.deleteWebHook();
       this.logger.log('🔧 Вебхуки отменены, переключаемся на polling');
     } catch (error) {
@@ -71,29 +61,21 @@ export class BotService implements OnModuleInit {
       throw error;
     }
 
-    // Логирование всех входящих сообщений для отладки
     this.bot.on('message', (msg) => {
       this.logger.log(`📨 Получено сообщение: ${msg.text || '(без текста)'} от @${msg.from?.username || 'no username'} в чате ${msg.chat.id}`);
     });
 
-    // Настраиваем обработчики команд
     this.setupHandlers();
 
     this.logger.log('✅ Telegram бот успешно инициализирован');
     this.logger.log(`🔑 Админы: ${this.adminUsernames.join(', ')}`);
   }
 
-  /**
-   * Проверить, является ли пользователь админом
-   */
   private isAdmin(username?: string): boolean {
     if (!username) return false;
     return this.adminUsernames.includes(username.toLowerCase());
   }
 
-  /**
-   * Проверить, что пользователь есть в чате
-   */
   private async isUserInChat(userId: number, chatId: string): Promise<boolean> {
     try {
       const member = await this.bot.getChatMember(chatId, userId);
@@ -104,11 +86,7 @@ export class BotService implements OnModuleInit {
     }
   }
 
-  /**
-   * Настройка обработчиков команд бота
-   */
   private setupHandlers() {
-    // Обработчик команды /start
     this.bot.onText(/\/start/, (msg) => {
       const chatId = msg.chat.id;
       const welcomeMessage = `
@@ -120,7 +98,7 @@ export class BotService implements OnModuleInit {
 /start - Показать это сообщение
 /help - Помощь
 /birthdays - Показать список всех дней рождения
-/today - Показать сегодняшние именинники
+/today - Показать сегодняшних именинников
 /stats - Статистика дней рождения
 /women - Показать список женщин
 
@@ -137,7 +115,6 @@ export class BotService implements OnModuleInit {
       this.bot.sendMessage(chatId, welcomeMessage);
     });
 
-    // Обработчик команды /help
     this.bot.onText(/\/help/, (msg) => {
       const chatId = msg.chat.id;
       const helpMessage = `
@@ -152,26 +129,24 @@ export class BotService implements OnModuleInit {
 /women - Список женщин в системе
 
 🔒 Админские команды:
-/add ДД.ММ.ГГГГ @username [male|female] - добавить день рождения с указанием пола  
+/add ДД.ММ.ГГГГ @username [male|female] - добавить день рождения
 /remove @username - удалить день рождения
-/test_evening - тестировать вечернее поздравление 8 марта
+/test_evening - тестировать поздравление 8 марта
 /help_admin - полная админская справка
 
 🎁 Особенности:
 ✅ Автоматические поздравления в 11:00
 🌸 Особое поздравление 8 марта в 18:00
 📱 Красивые поздравления с картинками
-🎂 Поздравления с возрастом и красивыми пожеланиями
 
 ⏰ Время отправки:
 • 11:00 - дни рождения
-• 18:00 - вечернее поздравление 8 марта (только 8 марта)
+• 18:00 - поздравление 8 марта (только 8 марта)
       `.trim();
 
       this.bot.sendMessage(chatId, helpMessage);
     });
 
-    // Обработчик команды /birthdays
     this.bot.onText(/\/birthdays/, (msg) => {
       const chatId = msg.chat.id;
       const people = this.peopleService.getAllPeople();
@@ -185,7 +160,6 @@ export class BotService implements OnModuleInit {
 
       people.forEach(person => {
         const age = this.peopleService.getPersonAge(person);
-        // Всегда используем @username если есть, иначе просто имя
         const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
         message += `👤 ${mention}\n📅 ${person.birthDate} (${age} лет)\n\n`;
       });
@@ -193,7 +167,6 @@ export class BotService implements OnModuleInit {
       this.bot.sendMessage(chatId, message);
     });
 
-    // Обработчик команды /today
     this.bot.onText(/\/today/, (msg) => {
       const chatId = msg.chat.id;
       const birthdayPeople = this.peopleService.getPeopleWithBirthdayToday();
@@ -207,7 +180,6 @@ export class BotService implements OnModuleInit {
 
       birthdayPeople.forEach(person => {
         const age = this.peopleService.getPersonAge(person);
-        // Всегда используем @username если есть, иначе просто имя
         const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
         message += `🎂 ${mention} (${age} лет)!\n`;
       });
@@ -216,7 +188,6 @@ export class BotService implements OnModuleInit {
       this.bot.sendMessage(chatId, message);
     });
 
-    // Обработчик команды /stats
     this.bot.onText(/\/stats/, async (msg) => {
       const chatId = msg.chat.id;
       const stats = this.peopleService.getBirthdayStats();
@@ -243,7 +214,6 @@ export class BotService implements OnModuleInit {
       await this.bot.sendMessage(chatId, message);
     });
 
-    // Обработчик команды /women
     this.bot.onText(/\/women/, (msg) => {
       const chatId = msg.chat.id;
       const allPeople = this.peopleService.getAllPeople();
@@ -264,45 +234,140 @@ export class BotService implements OnModuleInit {
       this.bot.sendMessage(chatId, message);
     });
 
-    // Обработчик команды /test_evening (только для админов)
+    // /test_evening — тест поздравления 8 марта (только для админов)
     this.bot.onText(/\/test_evening/, async (msg) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
-      // Отладочная информация
       this.logger.log(`🧪 Попытка выполнения /test_evening от @${username || 'no username'}`);
       this.logger.log(`👑 Список админов: ${this.adminUsernames.join(', ')}`);
-      this.logger.log(`✅ Проверка админа: ${this.isAdmin(username)}`);
 
-      // Проверка прав админа
       if (!this.isAdmin(username)) {
-        this.logger.log(`❌ Отказ в доступе для @${username}`);
         this.bot.sendMessage(chatId, '❌ Только администратор может тестировать поздравления!');
         return;
       }
 
-      this.logger.log('🧪 Тестирование вечернего поздравления с 8 марта');
-      
-      // Дополнительная отладка
+      this.logger.log('🧪 Тестирование поздравления с 8 марта');
+
       const allPeople = this.peopleService.getAllPeople();
       const women = this.holidaysService.getWomen(allPeople);
       this.logger.log(`👥 Всего людей в базе: ${allPeople.length}`);
       this.logger.log(`👭 Женщин найдено: ${women.length}`);
-      
-      if (women.length > 0) {
-        this.logger.log(`🌸 Список женщин: ${women.map(w => w.telegramUsername || w.name).join(', ')}`);
-      }
-      
-      await this.sendWomensDayEveningCongratulations();
-      this.bot.sendMessage(chatId, '✅ Вечернее поздравление с 8 марта отправлено для теста!');
+
+      await this.sendWomensDayCongratulations();
+      this.bot.sendMessage(chatId, '✅ Поздравление с 8 марта отправлено для теста!');
     });
 
-    // Обработчик команды /help_admin (только для админов)
+    this.bot.onText(/\/ai_test/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может тестировать AI!');
+        return;
+      }
+
+      this.logger.log('🤖 Тестирование AI генерации поздравления');
+
+      try {
+        const allPeople = this.peopleService.getAllPeople();
+        const women = this.holidaysService.getWomen(allPeople);
+
+        if (women.length === 0) {
+          this.bot.sendMessage(chatId, '❌ В списке нет женщин для поздравления');
+          return;
+        }
+
+        await this.sendWomensDayCongratulations();
+        this.bot.sendMessage(chatId, `✅ AI поздравление отправлено для ${women.length} женщин!`);
+      } catch (error) {
+        this.logger.error('Ошибка AI генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка AI генерации, проверьте логи');
+      }
+    });
+
+    this.bot.onText(/\/ai_birthday (.+)/, async (msg, match) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может тестировать AI!');
+        return;
+      }
+
+      const targetUsername = match[1].replace('@', '');
+
+      try {
+        const person = this.peopleService.getPersonByUsername(targetUsername);
+        if (!person) {
+          this.bot.sendMessage(chatId, `❌ Пользователь @${targetUsername} не найден`);
+          return;
+        }
+
+        await this.sendAiGeneratedGreeting({
+          name: 'День рождения',
+          recipientName: person.name
+        });
+        this.bot.sendMessage(chatId, `✅ AI поздравление с днем рождения для ${person.name} отправлено!`);
+      } catch (error) {
+        this.logger.error('Ошибка AI генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка AI генерации, проверьте логи');
+      }
+    });
+
+    this.bot.onText(/\/ai_holiday (.+)/, async (msg, match) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может тестировать AI!');
+        return;
+      }
+
+      const holidayName = match[1];
+
+      try {
+        await this.sendAiGeneratedGreeting({ name: holidayName });
+        this.bot.sendMessage(chatId, `✅ AI поздравление с ${holidayName} отправлено!`);
+      } catch (error) {
+        this.logger.error('Ошибка AI генерации:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка AI генерации, проверьте логи');
+      }
+    });
+
+    this.bot.onText(/\/ai_status/, async (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from?.username;
+
+      if (!this.isAdmin(username)) {
+        this.bot.sendMessage(chatId, '❌ Только администратор может проверять AI статус!');
+        return;
+      }
+
+      try {
+        const status = await this.testAiServices();
+
+        const statusMessage = `
+🤖 Статус AI сервисов:
+
+🧠 Google Gemini AI: ${status.ai ? '✅ Доступен' : '❌ Недоступен'}
+🎨 Генерация изображений: ${status.image ? '✅ Доступна' : '❌ Недоступна'}
+
+${status.ai ? '✅ AI генерация работает' : '❌ Проверьте GOOGLE_GEMINI_API_KEY'}
+${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьте HUGGINGFACE_API_KEY'}
+        `.trim();
+
+        this.bot.sendMessage(chatId, statusMessage);
+      } catch (error) {
+        this.logger.error('Ошибка проверки AI статуса:', error);
+        this.bot.sendMessage(chatId, '❌ Ошибка проверки статуса AI сервисов');
+      }
+    });
+
     this.bot.onText(/\/help_admin/, (msg) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
-      // Проверка прав админа
       if (!this.isAdmin(username)) {
         this.bot.sendMessage(chatId, '❌ Только администратор может видеть эту справку!');
         return;
@@ -316,7 +381,10 @@ export class BotService implements OnModuleInit {
 /remove @username - удалить пользователя
 
 🧪 Тестирование:
-/test_evening - тестировать вечернее поздравление 8 марта
+/test_evening - тестировать поздравление 8 марта (картинка + AI текст + ники)
+/ai_birthday @username - тестировать AI поздравление с днем рождения
+/ai_holiday [название] - тестировать AI поздравление с праздником
+/ai_status - проверить статус AI сервисов
 
 📊 Статистика:
 /birthdays - все дни рождения
@@ -326,19 +394,18 @@ export class BotService implements OnModuleInit {
 
 ⏰ Время отправки:
 • 11:00 - дни рождения
-• 18:00 - вечернее поздравление 8 марта (только 8 марта)
+• 18:00 - поздравление 8 марта
       `.trim();
 
       this.bot.sendMessage(chatId, adminHelpMessage);
     });
 
-    // Временная команда для отладки - показывает username
     this.bot.onText(/\/whoami/, (msg) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
       const firstName = msg.from?.first_name;
       const userId = msg.from?.id;
-      
+
       const debugInfo = `
 🔍 Debug информация:
 👤 Имя: ${firstName}
@@ -351,16 +418,12 @@ export class BotService implements OnModuleInit {
       this.bot.sendMessage(chatId, debugInfo);
     });
 
-    // Обработчик команды /add (только для админов)
     this.bot.onText(/\/add (.+)/, async (msg, match) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
-      // Проверка прав админа
       if (!this.isAdmin(username)) {
-        this.bot.sendMessage(chatId,
-            `❌ Только администратор может добавлять дни рождения!`
-        );
+        this.bot.sendMessage(chatId, `❌ Только администратор может добавлять дни рождения!`);
         return;
       }
 
@@ -379,20 +442,17 @@ export class BotService implements OnModuleInit {
       const telegramUsername = args[1];
       const gender = args[2] as 'male' | 'female' | undefined;
 
-      // Проверка формата даты
       const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
       if (!dateRegex.test(birthDate)) {
         this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ');
         return;
       }
 
-      // Проверка username
       if (!telegramUsername || !telegramUsername.startsWith('@')) {
         this.bot.sendMessage(chatId, '❌ Username должен начинаться с @. Пример: @username');
         return;
       }
 
-      // Проверка пола если указан
       if (gender && !['male', 'female'].includes(gender)) {
         this.bot.sendMessage(chatId, '❌ Пол должен быть male или female');
         return;
@@ -407,7 +467,6 @@ export class BotService implements OnModuleInit {
             chatId.toString()
         );
 
-        // Добавляем поле gender если указан
         if (gender) {
           person.gender = gender;
           await this.peopleService.saveData();
@@ -416,8 +475,7 @@ export class BotService implements OnModuleInit {
         const genderText = gender === 'female' ? '🌸 женщина' : gender === 'male' ? '👨 мужчина' : '';
         this.bot.sendMessage(chatId,
             `✅ ${telegramUsername} добавлен в список дней рождения! ${genderText} 🎂\n\n` +
-            `📝 Проверьте, что упоминание ${telegramUsername} кликабельное (синего цвета).\n` +
-            `Если нет - пользователь не найден в чате или username указан неверно.`
+            `📝 Проверьте, что упоминание ${telegramUsername} кликабельное (синего цвета).`
         );
 
         this.logger.log(`✅ Добавлен пользователь: ${telegramUsername} (${birthDate}) - ${gender || 'пол не указан'}`);
@@ -427,12 +485,10 @@ export class BotService implements OnModuleInit {
       }
     });
 
-    // Обработчик команды /remove (только для админов)
     this.bot.onText(/\/remove (.+)/, (msg, match) => {
       const chatId = msg.chat.id;
       const username = msg.from?.username;
 
-      // Проверка прав админа
       if (!this.isAdmin(username)) {
         this.bot.sendMessage(chatId, `❌ Только администратор может удалять дни рождения!`);
         return;
@@ -446,7 +502,6 @@ export class BotService implements OnModuleInit {
       const targetUsername = match[1].trim().replace('@', '');
 
       try {
-        // Ищем человека по username
         const person = this.peopleService.getAllPeople().find(p =>
             p.telegramUsername?.toLowerCase() === targetUsername.toLowerCase()
         );
@@ -467,14 +522,13 @@ export class BotService implements OnModuleInit {
       }
     });
 
-    // Обработчик ошибок
     this.bot.on('polling_error', (error) => {
       this.logger.error(`❌ Ошибка polling: ${error}`);
     });
   }
 
   /**
-   * Cron задача для проверки дней рождения каждый день в 11:00
+   * Cron: проверка дней рождения каждый день в 11:00
    */
   @Cron('0 11 * * *', {
     name: 'birthdayCheck',
@@ -488,149 +542,95 @@ export class BotService implements OnModuleInit {
     if (birthdayPeople.length === 0) {
       this.logger.log('📭 Сегодня нет именинников');
     } else {
-      // Отправляем поздравления
-      for (const person of birthdayPeople) {
-        await this.sendBirthdayCongratulations(person);
-      }
-    }
-
-    // Проверяем 8 марта - только вечернее поздравление
-    if (this.holidaysService.isInternationalWomensDay()) {
-      this.logger.log('🌸 Сегодня 8 марта - вечернее поздравление в 18:00!');
-      // Утреннее поздравление отключено
+      await this.sendBirthdayAICongratulations();
     }
   }
 
   /**
-   * Cron задача для красивого поздравления с 8 марта в 18:00
+   * Cron: поздравление с 8 марта в 18:00
    */
   @Cron('0 18 8 3 *', {
     name: 'womensDayEvening',
     timeZone: 'Europe/Kyiv',
   })
-  async sendWomensDayEveningCongratulations() {
-    this.logger.log('🌆 Запуск вечернего поздравления с 8 марта в 18:00');
+  async sendWomensDayCongratulations() {
+    this.logger.log('🌸 Запуск поздравления с 8 марта');
 
     const allPeople = this.peopleService.getAllPeople();
-    this.logger.log(`👥 Загружено людей из базы: ${allPeople.length}`);
-    
     const women = this.holidaysService.getWomen(allPeople);
-    this.logger.log(`👭 Отфильтровано женщин: ${women.length}`);
 
-    if (women.length === 0) {
-      this.logger.log('👭 В списке нет женщин для вечернего поздравления');
-      return;
-    }
-
-    this.logger.log(`🌸 Вечернее поздравление с 8 марта для ${women.length} женщин`);
-    this.logger.log(`🌸 Chat ID для отправки: ${this.chatId}`);
-
-    // Красивое поздравление
-    let beautifulMessage = `
-🌸✨🌺🌷🌹🌸✨🌺🌷🌹
-🌸✨ С 8 МАРТА, НАШИ ЛЮБИМЫЕ! ✨🌸
-🌺🌷🌹🌸✨🌺🌷🌹🌸✨
-
-Вы — настоящие королевы этого дня! 👑
-Ваша красота освещает мир! ✨
-Ваша сила вдохновляет нас! 💪
-Ваша нежность согревает сердца! ❤️
-
-🌸 Сегодня поздравляем наших прекрасных женщин:
-    `.trim();
-
-    // Добавляем список всех женщин
-    women.forEach(woman => {
-      const mention = woman.telegramUsername ? `@${woman.telegramUsername}` : woman.name;
-      beautifulMessage += `\n🌺 ${mention}`;
-    });
-
-    beautifulMessage += `
-
-🌟 Пусть каждый ваш день будет наполнен:
-   • Счастьем, что льется рекой 🌊
-   • Любовью, что окрыляет 🕊️
-   • Успехом во всех начинаниях 🎯
-   • Радостью и улыбками 😊
-
-🌺 Вы заслуживаете самого лучшего!
-🌷 Будьте всегда любимы и желанны!
-🌹 Пусть мечты сбываются мгновенно!
-
-💖 С праздником весны, наши дорогие женщины! 💖
-🌸✨🌺🌷🌹🌸✨🌺🌷🌹🌸✨
-
-С любовью и восхищением! 🌟
-    `.trim();
-
-    // Красивая картинка для 8 марта - несколько вариантов
-    const beautifulImages = [
-      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l4FGhGhS1NQh1s1qU/giphy.gif',
-      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7abKhOpu0NwenH3O/giphy.gif',
-      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7aD2saalBwwftBIY/giphy.gif',
-      'https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3ZkM2JqZzZqa3BiajFqamZ1d3ZqZ3NvY2ZxY2V3c2Fic2p6b3ZqbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/f3Jr9knTqQc2A/giphy.gif'
-    ];
-    
-    const beautifulImage = beautifulImages[Math.floor(Math.random() * beautifulImages.length)];
-
-    try {
-      this.logger.log('📸 Попытка отправки фото с поздравлением...');
-      // Отправляем красивую картинку с поздравлением
-      await this.bot.sendPhoto(this.chatId, beautifulImage, {
-        caption: beautifulMessage
-      });
-      
-      this.logger.log(`🌸 Вечернее поздравление с 8 марта отправлено для ${women.length} женщин`);
-    } catch (error) {
-      this.logger.error(`❌ Ошибка отправки фото: ${error.message}`);
-      // Если картинка не загрузилась, отправляем просто текст
-      try {
-        this.logger.log('📝 Попытка отправки текстового поздравления...');
-        await this.bot.sendMessage(this.chatId, beautifulMessage);
-        this.logger.log(`🌸 Вечернее поздравление с 8 марта отправлено (текст) для ${women.length} женщин`);
-      } catch (textError) {
-        this.logger.error(`❌ Ошибка отправки вечернего поздравления с 8 марта:`, textError);
-      }
-    }
-  }
-
-  /**
-   * Отправить поздравления с 8 марта
-   */
-  private async sendWomensDayCongratulations() {
-    const allPeople = this.peopleService.getAllPeople();
-    const women = this.holidaysService.getWomen(allPeople);
+    this.logger.log(`👭 Женщин найдено: ${women.length}`);
 
     if (women.length === 0) {
       this.logger.log('👭 В списке нет женщин для поздравления');
       return;
     }
 
-    this.logger.log(`🌸 Отправка поздравлений с 8 марта для ${women.length} женщин`);
+    // Формируем строку с упоминаниями всех женщин
+    const mentions = women
+        .map(w => w.telegramUsername ? `@${w.telegramUsername}` : w.name)
+        .join(', ');
 
-    // Создаем список всех женщин
-    let message = '🌸🌺🌷 С 8 марта! 🌷🌺🌸\n\n';
-    
-    women.forEach(woman => {
-      const mention = woman.telegramUsername ? `@${woman.telegramUsername}` : woman.name;
-      message += `${mention}\n`;
-    });
-
+    // Генерируем AI поздравление (текст + картинка) с упоминанием всех женщин
     try {
-      // Отправляем одно сообщение со списком всех женщин
-      await this.bot.sendMessage(this.chatId, message);
-      this.logger.log(`🌸 Поздравление с 8 марта отправлено для ${women.length} женщин`);
+      await this.sendAiGeneratedGreeting({
+        name: '8 марта',
+        recipientName: mentions,
+      });
+      this.logger.log(`✅ Поздравление с 8 марта отправлено для ${women.length} женщин`);
     } catch (error) {
-      this.logger.error(`❌ Ошибка отправки поздравления с 8 марта:`, error);
+      this.logger.error('❌ Ошибка отправки поздравления с 8 марта:', error);
+
+      // Фолбэк — простое текстовое поздравление
+      const fallbackMessage = `
+🌸✨ С 8 МАРТА, ДОРОГИЕ! ✨🌸
+
+🌺 Поздравляем: ${mentions}
+
+🌷 Пусть этот день принесёт вам радость, тепло и улыбки!
+💖 С праздником весны!
+      `.trim();
+
+      try {
+        await this.bot.sendMessage(this.chatId, fallbackMessage);
+        this.logger.log('📝 Фолбэк-поздравление отправлено');
+      } catch (fallbackError) {
+        this.logger.error('❌ Ошибка отправки фолбэк-поздравления:', fallbackError);
+      }
     }
   }
 
   /**
-   * Отправить поздравление с днём рождения
+   * AI поздравления с днем рождения каждому имениннику отдельно
+   */
+  private async sendBirthdayAICongratulations() {
+    this.logger.log('🎂 Запуск AI поздравления с днем рождения');
+
+    const birthdayPeople = this.peopleService.getPeopleWithBirthdayToday();
+
+    if (birthdayPeople.length === 0) {
+      this.logger.warn('Нет именинников для поздравления.');
+      return;
+    }
+
+    for (const person of birthdayPeople) {
+      try {
+        await this.sendAiGeneratedGreeting({
+          name: 'День рождения',
+          recipientName: person.telegramUsername ? `@${person.telegramUsername}` : person.name,
+        });
+        this.logger.log(`🎂 AI поздравление с днем рождения отправлено для ${person.name}`);
+      } catch (error) {
+        this.logger.error(`❌ Ошибка AI поздравления для ${person.name}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Отправить поздравление с днём рождения (простое, без AI)
    */
   private async sendBirthdayCongratulations(person: Person) {
     const age = this.peopleService.getPersonAge(person);
-    // Всегда используем @username для упоминания, если есть
     const mention = person.telegramUsername ? `@${person.telegramUsername}` : person.name;
 
     const congratulationsMessage = `
@@ -649,37 +649,13 @@ export class BotService implements OnModuleInit {
     `.trim();
 
     try {
-      // Случайная картинка поздравления
-      const birthdayImages = [
-        'https://media.giphy.com/media/3o7TKUtmGfJWg1t0wA/giphy.gif',
-        'https://media.giphy.com/media/3o7aD5sa1j2oHcCJhi/giphy.gif',
-        'https://media.giphy.com/media/l4FGkXHbV1k1sD4Hu/giphy.gif',
-        'https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif',
-        'https://media.giphy.com/media/3oFzmme8JFS1Y8wPqe/giphy.gif'
-      ];
-
-      const randomImage = birthdayImages[Math.floor(Math.random() * birthdayImages.length)];
-
-      // Отправляем картинку
-      await this.bot.sendPhoto(this.chatId, randomImage, {
-        caption: congratulationsMessage
-      });
-
-      this.logger.log(`✅ Поздравление отправлено: ${person.name} (@${person.telegramUsername || 'no username'})`);
+      await this.bot.sendMessage(this.chatId, congratulationsMessage);
+      this.logger.log(`✅ Поздравление отправлено: ${person.name}`);
     } catch (error) {
-      // Если картинка не загрузилась, отправляем просто текст
-      try {
-        await this.bot.sendMessage(this.chatId, congratulationsMessage);
-        this.logger.log(`✅ Поздравление отправлено (текст): ${person.name}`);
-      } catch (textError) {
-        this.logger.error(`❌ Ошибка отправки поздравления для ${person.name}:`, textError);
-      }
+      this.logger.error(`❌ Ошибка отправки поздравления для ${person.name}:`, error);
     }
   }
 
-  /**
-   * Отправить тестовое сообщение
-   */
   async sendTestMessage(message: string): Promise<void> {
     try {
       await this.bot.sendMessage(this.chatId, message);
@@ -690,15 +666,105 @@ export class BotService implements OnModuleInit {
     }
   }
 
-  /**
-   * Получить информацию о боте
-   */
   async getBotInfo(): Promise<any> {
     try {
       return await this.bot.getMe();
     } catch (error) {
       this.logger.error('❌ Ошибка получения информации о боте:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Отправка AI сгенерированного поздравления с изображением
+   */
+  async sendAiGeneratedGreeting(holidayData: { name: string; recipientName?: string }): Promise<void> {
+    try {
+      this.logger.log(`🤖 Начало AI генерации поздравления: ${holidayData.name}`);
+
+      // 1. Генерируем промпт
+      let prompt: string;
+      try {
+        prompt = await this.aiService.generatePrompt(holidayData);
+        this.logger.log(`✅ AI промпт сгенерирован: ${prompt.substring(0, 100)}...`);
+      } catch (error) {
+        this.logger.warn('⚠️ AI генерация промпта не удалась, используем резервный');
+        prompt = this.aiService.getFallbackPrompt(holidayData);
+      }
+
+      // 2. Генерируем изображение
+      let imageBuffer: Buffer;
+      try {
+        imageBuffer = await this.imageService.generateImage({
+          name: holidayData.name,
+          recipientName: holidayData.recipientName,
+          prompt: prompt,
+        });
+        this.logger.log(`✅ Изображение сгенерировано, размер: ${imageBuffer.length} байт`);
+      } catch (error) {
+        this.logger.error('❌ Генерация изображения не удалась:', error);
+        throw error;
+      }
+
+      // 3. Генерируем текст поздравления
+      let greetingText: string;
+      try {
+        greetingText = await this.aiService.generateGreetingText(holidayData);
+        this.logger.log('✅ Текст поздравления сгенерирован');
+      } catch (error) {
+        this.logger.warn('⚠️ AI генерация текста не удалась, используем резервный');
+        greetingText = this.aiService.getFallbackGreetingText(holidayData);
+      }
+
+      // Если есть получатели — добавляем их в начало подписи
+      const caption = holidayData.recipientName
+          ? `${greetingText}\n\n${holidayData.recipientName}`
+          : greetingText;
+
+      // 4. Отправляем фото с подписью
+      try {
+        await this.bot.sendPhoto(this.chatId, imageBuffer, {
+          caption,
+          parse_mode: 'HTML',
+        }, { filename: 'celebration.png', contentType: 'image/png' });
+        this.logger.log('✅ AI поздравление успешно отправлено в Telegram');
+      } catch (error) {
+        this.logger.error('❌ Ошибка отправки фото в Telegram:', error);
+
+        // Фолбэк — только текст
+        try {
+          await this.bot.sendMessage(this.chatId, caption);
+          this.logger.log('✅ Текстовое поздравление отправлено как запасной вариант');
+        } catch (textError) {
+          this.logger.error('❌ Ошибка отправки текста:', textError);
+          throw textError;
+        }
+      }
+    } catch (error) {
+      this.logger.error('❌ Общая ошибка AI генерации поздравления:', error);
+      throw error;
+    }
+  }
+
+  async testAiServices(): Promise<{ ai: boolean; image: boolean }> {
+    try {
+      const aiAvailable = await this.aiService.isAiAvailable();
+
+      let imageAvailable = false;
+      try {
+        const testImage = await this.imageService.generateImage({
+          name: 'Тест',
+          prompt: 'simple test image, solid color',
+        });
+        imageAvailable = testImage && testImage.length > 0;
+      } catch (error) {
+        this.logger.warn('⚠️ Генерация изображений недоступна:', error.message);
+      }
+
+      return { ai: aiAvailable, image: imageAvailable };
+    } catch (error) {
+      this.logger.error('❌ Ошибка тестирования AI сервисов:', error);
+      return { ai: false, image: false };
     }
   }
 }

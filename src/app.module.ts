@@ -4,6 +4,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { BotModule } from './bot/bot.module';
 import { PeopleModule } from './people/people.module';
 import { HolidaysModule } from './holidays/holidays.module';
+import { AiModule } from './ai/ai.module';
+import { ImageModule } from './image/image.module';
 
 /**
  * Корневой модуль приложения
@@ -27,6 +29,12 @@ import { HolidaysModule } from './holidays/holidays.module';
     
     // Модуль управления праздниками
     HolidaysModule,
+
+    // Модуль для AI генерации промптов
+    AiModule,
+
+    // Модуль для генерации изображений
+    ImageModule,
   ],
   controllers: [],
   providers: [],
