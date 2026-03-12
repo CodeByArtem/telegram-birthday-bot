@@ -51,7 +51,7 @@ export class AiService {
       }
 
       const model = this.genAI.getGenerativeModel(
-          { model: 'gemini-1.5-flash' },
+          { model: 'gemini-2.5-flash' },
           { apiVersion: 'v1beta' }
       );
 
@@ -168,7 +168,7 @@ ${basePrompt}${recipientText}${genderText}
       }
 
       const model = this.genAI.getGenerativeModel(
-          { model: 'gemini-1.5-flash' },
+          { model: 'gemini-2.5-flash' },
           { apiVersion: 'v1beta' }
       );
 
@@ -278,7 +278,7 @@ ${styleInstructions[style]}
       if (!apiKey) return false;
 
       const model = this.genAI.getGenerativeModel(
-          { model: 'gemini-1.5-flash' },
+          { model: 'gemini-2.5-flash' },
           { apiVersion: 'v1beta' }
       );
       await model.generateContent('test');
