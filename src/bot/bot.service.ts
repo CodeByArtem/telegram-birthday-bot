@@ -308,7 +308,7 @@ export class BotService implements OnModuleInit {
           name: 'День рождения',
           recipientName: person.name
         });
-        this.bot.sendMessage(chatId, `✅ AI поздравление с днем рождения для ${person.name} отправлено!`);
+        this.bot.sendMessage(chatId, `✅ AI поздравление с днем рождения для @${person.telegramUsername || person.name} отправлено!`);
       } catch (error) {
         this.logger.error('Ошибка AI генерации:', error);
         this.bot.sendMessage(chatId, '❌ Ошибка AI генерации, проверьте логи');
@@ -715,7 +715,7 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
           gender: person.gender
         });
 
-        this.logger.log(`🎨 Выбран стиль "${smartStyle}" для ${person.name} (${person.gender || 'пол не указан'})`);
+        this.logger.log(`🎨 Выбран стиль "${smartStyle}" для @${person.telegramUsername || person.name} (${person.gender || 'пол не указан'})`);
 
         await this.sendAiGeneratedGreeting({
           name: 'День рождения',
@@ -726,9 +726,9 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
           }
         });
         
-        this.logger.log(`🎂 AI поздравление с днем рождения отправлено для ${person.name} (стиль: ${smartStyle})`);
+        this.logger.log(`🎂 AI поздравление с днем рождения отправлено для @${person.telegramUsername || person.name} (стиль: ${smartStyle})`);
       } catch (error) {
-        this.logger.error(`❌ Ошибка AI поздравления для ${person.name}:`, error);
+        this.logger.error(`❌ Ошибка AI поздравления для @${person.telegramUsername || person.name}:`, error);
       }
     }
   }
@@ -757,9 +757,9 @@ ${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьт
 
     try {
       await this.bot.sendMessage(this.chatId, congratulationsMessage);
-      this.logger.log(`✅ Поздравление отправлено: ${person.name}`);
+      this.logger.log(`✅ Поздравление отправлено: @${person.telegramUsername || person.name}`);
     } catch (error) {
-      this.logger.error(`❌ Ошибка отправки поздравления для ${person.name}:`, error);
+      this.logger.error(`❌ Ошибка отправки поздравления для @${person.telegramUsername || person.name}:`, error);
     }
   }
 
