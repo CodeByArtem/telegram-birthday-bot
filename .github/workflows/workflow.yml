@@ -12,7 +12,7 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: 130.61.253.163
+          host: 138.2.140.251
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 20m
