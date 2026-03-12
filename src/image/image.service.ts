@@ -31,29 +31,40 @@ export class ImageService {
     try {
       this.logger.log(`Генерация изображения для: ${holidayData.name}`);
 
-      // 1. Пробуем Pollinations AI (бесплатно)
+      // 1. StableHorde (бесплатно, стабильно)
       try {
-        const imageBuffer = await this.generateWithPollinations(holidayData);
-        if (imageBuffer) {
+        const buf = await this.generateWithStableHorde(holidayData);
+        if (buf) {
+          this.logger.log('✅ Изображение сгенерировано через StableHorde');
+          return this.saveImage(buf, holidayData.name);
+        }
+      } catch (error) {
+        this.logger.warn('StableHorde не сработал:', error.message);
+      }
+
+      // 2. Pollinations
+      try {
+        const buf = await this.generateWithPollinations(holidayData);
+        if (buf) {
           this.logger.log('✅ Изображение сгенерировано через Pollinations');
-          return this.saveImage(imageBuffer, holidayData.name);
+          return this.saveImage(buf, holidayData.name);
         }
       } catch (error) {
-        this.logger.warn('Pollinations API не сработал:', error.message);
+        this.logger.warn('Pollinations не сработал:', error.message);
       }
 
-      // 2. Пробуем Replicate
+      // 3. Replicate
       try {
-        const imageBuffer = await this.generateWithReplicate(holidayData);
-        if (imageBuffer) {
+        const buf = await this.generateWithReplicate(holidayData);
+        if (buf) {
           this.logger.log('✅ Изображение сгенерировано через Replicate');
-          return this.saveImage(imageBuffer, holidayData.name);
+          return this.saveImage(buf, holidayData.name);
         }
       } catch (error) {
-        this.logger.warn('Replicate API не сработал:', error.message);
+        this.logger.warn('Replicate не сработал:', error.message);
       }
 
-      // 3. Используем PNG-заглушку
+      // 4. Заглушка
       this.logger.warn('Все API недоступны, используем PNG-заглушку');
       return this.getFallbackImage(holidayData);
 
@@ -145,7 +156,7 @@ export class ImageService {
       const response = await axios.post(
           'https://api.replicate.com/v1/predictions',
           {
-            version: 'ac732df83cea7fff18b8472768c88ad041fa750ff7682a21affe81863cbe77e465b',
+            version: '7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc',
             input: {
               prompt,
               width: 512,
@@ -160,18 +171,27 @@ export class ImageService {
               Authorization: `Token ${apiKey}`,
               'Content-Type': 'application/json',
             },
-            timeout: 60000,
+            timeout: 30000,
           }
       );
 
-      if (response.data?.urls?.get) {
-        const getResult = await axios.get(response.data.urls.get, {
+      const predictionUrl = response.data?.urls?.get;
+      if (!predictionUrl) return null;
+
+      // Polling — ждём результата (макс ~2 минуты)
+      for (let i = 0; i < 24; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+
+        const poll = await axios.get(predictionUrl, {
           headers: { Authorization: `Token ${apiKey}` },
-          timeout: 120000,
+          timeout: 10000,
         });
 
-        if (getResult.data?.output?.length > 0) {
-          const imageUrl = getResult.data.output[0];
+        const status = poll.data?.status;
+        this.logger.log(`Replicate статус: ${status}`);
+
+        if (status === 'succeeded' && poll.data?.output?.length > 0) {
+          const imageUrl = poll.data.output[0];
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
             timeout: 30000,
@@ -179,11 +199,20 @@ export class ImageService {
           const buf = Buffer.from(imageResponse.data);
           return this.isValidImage(buf) ? buf : null;
         }
+
+        if (status === 'failed' || status === 'canceled') {
+          this.logger.warn(`Replicate завершился со статусом: ${status}`);
+          this.logger.warn(JSON.stringify(poll.data?.error));
+          return null;
+        }
       }
 
+      this.logger.warn('Replicate: таймаут ожидания результата');
       return null;
+
     } catch (error) {
       this.logger.warn('Replicate ошибка:', error.message);
+      this.logger.warn(JSON.stringify(error.response?.data));
       return null;
     }
   }
@@ -383,6 +412,62 @@ export class ImageService {
       });
     } catch (error) {
       this.logger.error('Ошибка очистки старых изображений:', error);
+    }
+  }
+  private async generateWithStableHorde(holidayData: HolidayImageData): Promise<Buffer | null> {
+    try {
+      const apiKey = this.configService.get<string>('STABLE_HORDE_API_KEY') || '0000000000';
+      const prompt = this.getDefaultPrompt(holidayData);
+
+      const job = await axios.post(
+          'https://stablehorde.net/api/v2/generate/async',
+          {
+            prompt,
+            params: { width: 512, height: 512, steps: 20, n: 1 },
+            r2: false,
+          },
+          {
+            headers: {
+              'apikey': apiKey,
+              'Content-Type': 'application/json',
+            },
+            timeout: 15000,
+          }
+      );
+
+      const jobId = job.data?.id;
+      if (!jobId) return null;
+
+      this.logger.log(`StableHorde job: ${jobId}`);
+
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+
+        const check = await axios.get(
+            `https://stablehorde.net/api/v2/generate/check/${jobId}`,
+            { timeout: 10000 }
+        );
+
+        this.logger.log(`StableHorde: done=${check.data?.done}, queue=${check.data?.queue_position}`);
+
+        if (check.data?.done) {
+          const result = await axios.get(
+              `https://stablehorde.net/api/v2/generate/status/${jobId}`,
+              { timeout: 10000 }
+          );
+
+          const imageBase64 = result.data?.generations?.[0]?.img;
+          if (imageBase64) {
+            const buf = Buffer.from(imageBase64, 'base64');
+            return this.isValidImage(buf) ? buf : null;
+          }
+        }
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.warn('StableHorde ошибка:', error.message);
+      return null;
     }
   }
 }
