@@ -140,7 +140,9 @@ export class ImageService {
         buffer[1] === 0xd8 &&
         buffer[2] === 0xff;
 
-    return isPng || isJpeg;
+    // WebP: начинается с 52 49 46 46 (RIFF)
+    const isWebP = buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46;
+    return isPng || isJpeg || isWebP;
   }
 
   /**
@@ -456,7 +458,9 @@ export class ImageService {
               { timeout: 10000 }
           );
 
-          const imageBase64 = result.data?.generations?.[0]?.img;
+          const gen = result.data?.generations?.[0];
+          this.logger.log(`StableHorde gen: ${JSON.stringify(gen)}`);
+          const imageBase64 = gen?.img;
           if (imageBase64) {
             const buf = Buffer.from(imageBase64, 'base64');
             return this.isValidImage(buf) ? buf : null;
