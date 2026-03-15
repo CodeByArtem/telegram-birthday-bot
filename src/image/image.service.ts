@@ -140,6 +140,12 @@ export class ImageService {
    */
   private isValidImage(buffer: Buffer): boolean {
     if (buffer.length < 8) return false;
+    
+    // Проверка минимального размера для StableHorde WebP
+    if (buffer.length < 50000) {
+      this.logger.warn(`Изображение слишком маленькое: ${buffer.length} байт, пропускаем`);
+      return false;
+    }
 
     // PNG: начинается с 89 50 4E 47 0D 0A 1A 0A
     const isPng =

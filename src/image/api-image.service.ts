@@ -70,12 +70,12 @@ export class ApiImageService {
 
       this.logger.log(`🔍 Unsplash поиск: "${query}"`);
 
-      const response = await axios.get('https://api.unsplash.com/search', {
+      const response = await axios.get('https://api.unsplash.com/search/photos', {
         params: {
           query,
           orientation: 'squarish',
           per_page: 10,
-          page: Math.floor(Math.random() * 100) + 1,
+          page: 1, // Всегда первая страница
           content_filter: 'high'
         },
         headers: {
@@ -254,8 +254,8 @@ export class ApiImageService {
           orientation: 'vertical',
           category: 'celebrations',
           safesearch: true,
-          per_page: 20, // Запрашиваем 20 изображений для максимального разнообразия
-          page: Math.floor(Math.random() * 50) + 1 // Случайная страница из 50
+          per_page: 30, // Увеличим до 30 для больше результатов
+          page: 1 // Всегда первая страница
         },
         timeout: 10000
       });
