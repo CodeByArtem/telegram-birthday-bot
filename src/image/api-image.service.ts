@@ -21,10 +21,10 @@ export class ApiImageService {
    */
   async getRandomImage(imageData: ApiImageData): Promise<Buffer | null> {
     try {
-      // Очищаем старые изображения если накопилось много (больше 1000)
-      if (this.usedImages.size > 1000) {
+      // Очищаем старые изображения если накопилось много (больше 100)
+      if (this.usedImages.size > 100) {
         this.usedImages.clear();
-        this.logger.log('🗑️ Очищены старые использованные изображения (1000+ использовано)');
+        this.logger.log('🗑️ Очищены старые использованные изображения');
       }
       
       // 1. Unsplash API (бесплатные красивые изображения)
@@ -68,12 +68,14 @@ export class ApiImageService {
         return null;
       }
 
+      this.logger.log(`🔍 Unsplash поиск: "${query}"`);
+
       const response = await axios.get('https://api.unsplash.com/search', {
         params: {
           query,
           orientation: 'squarish',
-          per_page: 10, // Запрашиваем 10 изображений
-          page: Math.floor(Math.random() * 100) + 1, // Случайная страница из 100
+          per_page: 10,
+          page: Math.floor(Math.random() * 100) + 1,
           content_filter: 'high'
         },
         headers: {
@@ -81,6 +83,8 @@ export class ApiImageService {
         },
         timeout: 10000
       });
+
+      this.logger.log(`📊 Unsplash статус: ${response.status}, найдено: ${response.data?.results?.length || 0} изображений`);
 
       if (response.data?.results?.length > 0) {
         // Фильтруем уже использованные изображения
@@ -98,6 +102,8 @@ export class ApiImageService {
         // Запоминаем ID использованного изображения
         this.usedImages.add(randomImage.id);
         
+        this.logger.log(`✅ Unsplash выбрано изображение ID: ${randomImage.id}`);
+        
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
@@ -109,9 +115,64 @@ export class ApiImageService {
 
       return null;
     } catch (error) {
-      this.logger.warn('Unsplash API ошибка:', error.message);
+      if (error.response?.status === 404) {
+        this.logger.error(`❌ Unsplash 404: Изображения не найдены по запросу, пробуем fallback`);
+        // Пробуем универсальный запрос
+        return this.tryUnsplashFallback(imageData);
+      } else if (error.response?.status === 401) {
+        this.logger.error('❌ Unsplash 401: Неверный API ключ');
+      } else if (error.response?.status === 403) {
+        this.logger.error('❌ Unsplash 403: Лимит API исчерпан');
+      } else {
+        this.logger.error(`❌ Unsplash API ошибка: ${error.message}`);
+      }
       return null;
     }
+  }
+
+  /**
+   * Fallback для Unsplash с универсальными запросами
+   */
+  private async tryUnsplashFallback(imageData: ApiImageData): Promise<Buffer | null> {
+    try {
+      const fallbackQueries = ['birthday', 'celebration', 'party', 'happy', 'festive'];
+      const randomQuery = fallbackQueries[Math.floor(Math.random() * fallbackQueries.length)];
+      
+      this.logger.log(`🔄 Unsplash fallback: "${randomQuery}"`);
+
+      const accessKey = this.configService.get<string>('UNSPLASH_ACCESS_KEY');
+      const response = await axios.get('https://api.unsplash.com/search', {
+        params: {
+          query: randomQuery,
+          orientation: 'squarish',
+          per_page: 5,
+          page: Math.floor(Math.random() * 50) + 1,
+          content_filter: 'high'
+        },
+        headers: {
+          'Authorization': `Client-ID ${accessKey}`
+        },
+        timeout: 10000
+      });
+
+      if (response.data?.results?.length > 0) {
+        const randomImage = response.data.results[Math.floor(Math.random() * response.data.results.length)];
+        const imageUrl = randomImage.urls?.regular;
+        
+        if (imageUrl) {
+          this.usedImages.add(randomImage.id);
+          const imageResponse = await axios.get(imageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 15000
+          });
+          this.logger.log(`✅ Unsplash fallback успешен: ${randomImage.id}`);
+          return Buffer.from(imageResponse.data);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`❌ Unsplash fallback тоже не сработал: ${error.message}`);
+    }
+    return null;
   }
 
   /**
@@ -238,94 +299,123 @@ export class ApiImageService {
     const holiday = imageData.name;
     const style = imageData.style || GreetingStyle.FRIENDLY;
 
+    // Универсальные простые запросы на английском
+    const universalQueries = [
+      'birthday celebration',
+      'party celebration', 
+      'happy birthday',
+      'celebration party',
+      'birthday cake',
+      'festive celebration',
+      'party decorations',
+      'birthday balloons',
+      'celebration confetti',
+      'happy celebration'
+    ];
+
+    // Простой fallback если ничего не найдено
+    const fallbackQueries = [
+      'celebration',
+      'party',
+      'happy',
+      'birthday',
+      'festive'
+    ];
+
     const queries = {
       'День рождения': {
         [GreetingStyle.OFFICIAL]: [
-          'elegant birthday celebration formal cake',
-          'sophisticated birthday party luxury',
-          'formal birthday decorations premium'
+          'elegant birthday celebration',
+          'formal birthday party',
+          'sophisticated birthday cake'
         ],
         [GreetingStyle.FUNNY]: [
-          'joyful birthday party colorful balloons',
-          'funny birthday celebration confetti',
-          'happy birthday party decorations'
+          'fun birthday party',
+          'happy birthday balloons',
+          'birthday celebration fun'
         ],
         [GreetingStyle.POETIC]: [
-          'dreamy birthday scene beautiful flowers',
-          'romantic birthday cake delicate roses',
-          'artistic watercolor birthday celebration'
+          'beautiful birthday',
+          'romantic birthday',
+          'dreamy birthday celebration'
         ],
         [GreetingStyle.FRIENDLY]: [
-          'warm birthday celebration cozy',
-          'cheerful birthday balloons streamers',
-          'happy birthday party friends'
+          'happy birthday',
+          'birthday celebration',
+          'birthday party friends'
         ],
         [GreetingStyle.ROMANTIC]: [
-          'romantic birthday dinner candles',
-          'intimate birthday celebration roses',
-          'elegant birthday setting romantic'
+          'romantic birthday',
+          'intimate birthday',
+          'elegant birthday dinner'
         ]
       },
       '8 марта': {
         [GreetingStyle.OFFICIAL]: [
-          'international women day elegant flowers',
-          'formal women day celebration spring',
-          'professional women day flowers'
+          'international women day',
+          'women day flowers',
+          'formal women day'
         ],
         [GreetingStyle.FUNNY]: [
-          'women day celebration colorful spring',
-          'funny women day party flowers',
-          'happy women day bright colors'
+          'women day celebration',
+          'happy women day',
+          'women day party'
         ],
         [GreetingStyle.POETIC]: [
-          'beautiful spring flowers women day',
-          'romantic women day flowers',
-          'dreamy women day celebration'
+          'beautiful women day',
+          'romantic women day',
+          'women day spring flowers'
         ],
         [GreetingStyle.FRIENDLY]: [
-          'happy women day celebration',
-          'warm women day flowers',
-          'cheerful women day spring'
+          'happy women day',
+          'women day celebration',
+          'women day spring'
         ],
         [GreetingStyle.ROMANTIC]: [
-          'romantic women day roses',
-          'intimate women day celebration',
-          'elegant women day flowers'
+          'romantic women day',
+          'women day roses',
+          'elegant women day'
         ]
       },
       'Новый год': {
         [GreetingStyle.OFFICIAL]: [
-          'elegant new year celebration formal',
-          'luxury new year party champagne',
-          'sophisticated new year fireworks'
+          'elegant new year',
+          'formal new year',
+          'sophisticated new year'
         ],
         [GreetingStyle.FUNNY]: [
-          'funny new year party celebration',
-          'colorful new year fireworks',
-          'happy new year party decorations'
+          'fun new year party',
+          'happy new year',
+          'new year celebration'
         ],
         [GreetingStyle.POETIC]: [
-          'magical new year snow winter',
-          'dreamy winter snow landscape',
-          'romantic new year candles'
+          'magical new year',
+          'dreamy winter new year',
+          'romantic new year'
         ],
         [GreetingStyle.FRIENDLY]: [
-          'happy new year family celebration',
-          'warm new year party gathering',
-          'cheerful new year celebration'
+          'happy new year',
+          'new year celebration',
+          'new year family'
         ],
         [GreetingStyle.ROMANTIC]: [
-          'romantic new year dinner candles',
-          'intimate new year celebration',
-          'elegant new year candles'
+          'romantic new year',
+          'intimate new year',
+          'elegant new year dinner'
         ]
       }
     };
 
-    const holidayQueries = queries[holiday]?.[style] || ['celebration party festive'];
-    const randomQuery = holidayQueries[Math.floor(Math.random() * holidayQueries.length)];
-    
-    return randomQuery;
+    // 1. Пытаемся найти по конкретному запросу
+    const holidayQueries = queries[holiday]?.[style];
+    if (holidayQueries && holidayQueries.length > 0) {
+      const randomQuery = holidayQueries[Math.floor(Math.random() * holidayQueries.length)];
+      return randomQuery;
+    }
+
+    // 2. Fallback на универсальные запросы
+    const randomUniversal = universalQueries[Math.floor(Math.random() * universalQueries.length)];
+    return randomUniversal;
   }
 
   /**
