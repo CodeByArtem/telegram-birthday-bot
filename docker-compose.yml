@@ -1,21 +1,14 @@
+version: '3.8'
+
 services:
   telegram-bot:
     build: .
     container_name: telegram-birthday-bot
     restart: unless-stopped
-    # Это заставит Docker искать переменные в файле .env на сервере
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      - ADMIN_USERNAMES=${ADMIN_USERNAMES}
-      - GOOGLE_GEMINI_API_KEY=${GOOGLE_GEMINI_API_KEY}
-      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
-      - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY}
-      - PEXELS_API_KEY=${PEXELS_API_KEY}
-      - PIXABAY_API_KEY=${PIXABAY_API_KEY}
       - PORT=3000
     ports:
       - "8080:3000"
