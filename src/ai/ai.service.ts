@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GroqService } from './groq.service';
+import { AiOrchestrationService } from './ai-orchestration.service';
 
 export enum GreetingStyle {
   OFFICIAL = 'official',
@@ -34,7 +36,11 @@ export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly genAI: GoogleGenerativeAI;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private groqService: GroqService,
+    private aiOrchestrationService: AiOrchestrationService
+  ) {
     const apiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
     if (!apiKey) {
       this.logger.warn('GOOGLE_GEMINI_API_KEY не найден, AI генерация будет отключена');
@@ -162,57 +168,43 @@ ${basePrompt}${recipientText}${genderText}
 
   async generateGreetingText(holidayData: HolidayPromptData): Promise<string> {
     try {
-      const apiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
-      if (!apiKey) {
-        return this.getFallbackGreetingText(holidayData);
-      }
+      // Используем AI Orchestration Layer для умного выбора модели
+      const result = await this.aiOrchestrationService.generateGreetingText(holidayData, {
+        style: holidayData.style || GreetingStyle.FRIENDLY,
+        language: holidayData.language || GreetingLanguage.RUSSIAN,
+        maxRetries: 2,
+        timeout: 10000
+      });
 
-      const model = this.genAI.getGenerativeModel(
-          { model: 'gemini-2.5-flash' },
-          { apiVersion: 'v1beta' }
-      );
+      this.logger.log(`✅ AI Orchestration: ${result.provider} сгенерировал текст (${result.reasoning})`);
+      return result.text;
 
+    } catch (error) {
+      this.logger.error('❌ AI Orchestration ошибка:', error.message);
+      return this.getFallbackGreetingText(holidayData);
+    }
+  }
+
+  /**
+   * Fallback на Groq если Gemini превысил лимит
+   */
+  private async tryGroqFallback(holidayData: HolidayPromptData): Promise<string> {
+    try {
+      const recipientName = holidayData.recipientName || 'друг';
+      const holiday = holidayData.name;
       const style = holidayData.style || GreetingStyle.FRIENDLY;
-      const recipientText = holidayData.recipientName
-          ? ` для ${holidayData.recipientName}`
-          : '';
-
-      const styleInstructions = {
-        [GreetingStyle.OFFICIAL]: 'Напиши официальное, торжественное поздравление. Используй уважительный тон, формальные выражения.',
-        [GreetingStyle.FUNNY]: 'Напиши веселое, шутливое поздравление. Используй юмор, позитив, забавные выражения.',
-        [GreetingStyle.POETIC]: 'Напиши поэтическое поздравление. Используй красивые метафоры, рифмы, образный язык.',
-        [GreetingStyle.FRIENDLY]: 'Напиши дружеское, теплое поздравление. Используй неформальный, но уважительный тон.',
-        [GreetingStyle.ROMANTIC]: 'Напиши романтичное поздравление. Используй нежные слова, комплименты, теплые выражения.'
-      };
-
-      const prompt = `
-${styleInstructions[style]}
-
-Напиши красивое поздравление с ${holidayData.name}${recipientText}.
-
-Требования:
-- Текст должен быть теплым и искренним
-- Включи эмодзи для настроения
-- Длина: 2-3 предложения
-- Без лишних формальностей
-- На русском языке
-- НЕ упоминай имена получателей в тексте — только само поздравление
-- Отвечай ТОЛЬКО текстом поздравления, без вступлений типа "Вот поздравление:", "Конечно!", "Вариант 1:" и т.д.
-- Пиши только ОДНО поздравление, без вариантов
-
-Пример для дружеского стиля: "🌸 С 8 марта! Желаю весеннего настроения, красоты и счастья! 🌷"
-Пример для официального стиля: "🎊 Поздравляю с 8 марта! Желаю профессиональных успехов и личного благополучия! ✨"
-Пример для веселого стиля: "🎉 С днем рождения! Пусть жизнь будет как яркий карнавал! 🎈🎊"
-Пример для поэтического стиля: "🌟 Как весенний цветок, пусть расцветает твоя душа в этот праздник! 🌺✨"
-      `.trim();
-
-      const result = await model.generateContent(prompt);
-      const text = result.response.text().trim();
-
-      this.logger.log(`Сгенерирован текст (${style}): ${holidayData.name}`);
+      
+      const text = await this.groqService.generateGreetingText(
+        recipientName,
+        holiday,
+        style,
+        'russian'
+      );
+      
+      this.logger.log(`✅ Groq сгенерировал текст поздравления (${style}): ${holiday}`);
       return text;
     } catch (error) {
-      this.logger.error('Ошибка генерации текста поздравления:', error);
+      this.logger.error('❌ Groq fallback тоже не сработал:', error.message);
       return this.getFallbackGreetingText(holidayData);
     }
   }

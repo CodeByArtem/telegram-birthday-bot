@@ -7,6 +7,7 @@ import { PeopleService, Person } from '../people/people.service';
 import { HolidaysService } from '../holidays/holidays.service';
 import { AiService, GreetingStyle } from '../ai/ai.service';
 import { ImageService } from '../image/image.service';
+import { AiOrchestrationService } from '../ai/ai-orchestration.service';
 
 type TelegramBotInstance = InstanceType<typeof TelegramBot>;
 
@@ -23,6 +24,7 @@ export class BotService implements OnModuleInit {
       private readonly holidaysService: HolidaysService,
       private readonly aiService: AiService,
       private readonly imageService: ImageService,
+      private readonly aiOrchestrationService: AiOrchestrationService,
   ) {}
 
   async onModuleInit() {
@@ -429,19 +431,32 @@ export class BotService implements OnModuleInit {
       }
 
       try {
-        const status = await this.testAiServices();
+        // Получаем детальную статистику от AI Orchestration
+        const orchestrationStats = this.aiOrchestrationService.getUsageStats();
+        const predictions = this.aiOrchestrationService.predictLimitExhaustion();
 
         const statusMessage = `
-🤖 Статус AI сервисов:
+🤖 **AI Orchestration Status:**
 
-🧠 Google Gemini AI: ${status.ai ? '✅ Доступен' : '❌ Недоступен'}
-🎨 Генерация изображений: ${status.image ? '✅ Доступна' : '❌ Недоступна'}
+📊 **Провайдеры:**
+${orchestrationStats.providers.map(p => 
+  `${p.name}: ${p.isAvailable ? '✅' : '❌'} (${p.usagePercentage}%/${p.dailyLimit})`
+).join('\n')}
 
-${status.ai ? '✅ AI генерация работает' : '❌ Проверьте GOOGLE_GEMINI_API_KEY'}
-${status.image ? '✅ Stable Diffusion работает' : '❌ Проверьте HUGGINGFACE_API_KEY'}
+📈 **Статистика:**
+🔄 Всего запросов: ${orchestrationStats.summary.totalRequests}
+🟢 Успешных: ${Object.values(orchestrationStats.usageStats).reduce((sum, stat) => sum + stat.success, 0)}
+🔴 Неудачных: ${Object.values(orchestrationStats.usageStats).reduce((sum, stat) => sum + stat.failed, 0)}
+
+⏰ **Предсказание лимитов:**
+${predictions.map(p => 
+  `${p.provider}: ${p.remainingRequests} осталось (~${p.hoursUntilExhaustion}ч)`
+).join('\n')}
+
+🎯 **Доступно провайдеров:** ${orchestrationStats.summary.availableProviders}/${orchestrationStats.summary.totalProviders}
         `.trim();
 
-        this.bot.sendMessage(chatId, statusMessage);
+        this.bot.sendMessage(chatId, statusMessage, { parse_mode: 'Markdown' });
       } catch (error) {
         this.logger.error('Ошибка проверки AI статуса:', error);
         this.bot.sendMessage(chatId, '❌ Ошибка проверки статуса AI сервисов');
