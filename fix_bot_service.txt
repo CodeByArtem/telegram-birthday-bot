@@ -1,0 +1,6 @@
+prompt = await this.aiService.generatePrompt(holidayData);
+        this.logger.log(`✅ AI промпт сгенерирован: ${prompt.substring(0, 100)}...`);
+      } catch (error) {
+        this.logger.warn('⚠️ AI генерация промпта не удалась, используем резервный');
+        prompt = this.aiService.getFallbackPrompt(holidayData);
+      }

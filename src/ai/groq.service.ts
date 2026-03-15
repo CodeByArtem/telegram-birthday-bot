@@ -1,11 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Groq from 'groq-sdk';
+import { GreetingStyle, GreetingLanguage } from './ai.service';
 
 @Injectable()
 export class GroqService {
   private readonly logger = new Logger(GroqService.name);
   private readonly groq: Groq;
+  private promptCache = new Map<string, string>(); // Кэш промптов
 
   constructor(private configService: ConfigService) {
     const apiKey = this.configService.get<string>('GROQ_API_KEY');
@@ -28,7 +30,7 @@ export class GroqService {
       const prompt = this.buildPrompt(recipientName, holiday, style, language);
 
       const response = await this.groq.chat.completions.create({
-        model: 'llama-3.1-8b-instant', // Обновленная модель
+        model: 'llama-3.3-70b-versatile',
         messages: [
           {
             role: 'system',
@@ -54,6 +56,67 @@ export class GroqService {
 
     } catch (error) {
       this.logger.error('❌ Ошибка генерации текста через Groq:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Генерация промпта для изображений через Groq
+   */
+  async generateImagePrompt(
+    holiday: string,
+    style: string = 'friendly',
+    language: string = 'russian'
+  ): Promise<string> {
+    try {
+      // Проверяем кэш
+      const cacheKey = `${holiday}-${style}-${language}`;
+      if (this.promptCache.has(cacheKey)) {
+        this.logger.log(`📋 Использую кэшированный промпт для ${holiday}`);
+        return this.promptCache.get(cacheKey)!;
+      }
+
+      const prompt = `Сгенерируй промпт для AI генерации изображения на тему "${holiday}" в стиле "${style}" на ${language} языке.
+
+Требования:
+- Детальное описание сцены
+- Упоминание цветов, настроения
+- Профессиональные термины (digital art, high resolution, detailed)
+- Длина: 50-100 слов
+- Без упоминания людей в промпте
+
+Пример ответа:
+"Masterful digital art with ultra-detailed illustration, vibrant birthday celebration, colorful balloons and confetti, warm lighting, high resolution, professional photography style"`;
+
+      const response = await this.groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'system',
+            content: 'Ты - эксперт по AI промптам для генерации изображений. Создавай детальные и профессиональные промпты.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 300,
+        temperature: 0.5
+      });
+
+      const generatedPrompt = response.choices[0]?.message?.content?.trim();
+      
+      if (!generatedPrompt) {
+        throw new Error('Groq вернул пустой промпт');
+      }
+
+      // Сохраняем в кэш
+      this.promptCache.set(cacheKey, generatedPrompt);
+      this.logger.log(`✅ Groq сгенерировал промпт для изображения (${generatedPrompt.length} символов)`);
+      return generatedPrompt;
+
+    } catch (error) {
+      this.logger.error('❌ Ошибка генерации промпта через Groq:', error.message);
       throw error;
     }
   }
@@ -107,7 +170,7 @@ ${languagePrompt}.
   async checkAvailability(): Promise<boolean> {
     try {
       const response = await this.groq.chat.completions.create({
-        model: 'llama-3.1-8b-instant', // Обновленная модель
+        model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'user', content: 'Hello' }],
         max_tokens: 10
       });
@@ -116,5 +179,23 @@ ${languagePrompt}.
       this.logger.warn('Groq API недоступен:', error.message);
       return false;
     }
+  }
+
+  /**
+   * Очистка кэша промптов
+   */
+  clearPromptCache(): void {
+    this.promptCache.clear();
+    this.logger.log('🗑️ Кэш промптов очищен');
+  }
+
+  /**
+   * Получение статистики кэша
+   */
+  getPromptCacheStats(): { size: number; keys: string[] } {
+    return {
+      size: this.promptCache.size,
+      keys: Array.from(this.promptCache.keys())
+    };
   }
 }

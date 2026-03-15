@@ -31,6 +31,18 @@ export interface HolidayPromptData {
   };
 }
 
+export interface HolidayImageData {
+  name: string;
+  style?: GreetingStyle;
+  prompt?: string;
+  recipientInfo?: {
+    age?: number;
+    gender?: 'male' | 'female';
+    interests?: string[];
+  };
+  language?: GreetingLanguage;
+}
+
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
@@ -43,127 +55,28 @@ export class AiService {
   ) {
     const apiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
     if (!apiKey) {
-      this.logger.warn('GOOGLE_GEMINI_API_KEY не найден, AI генерация будет отключена');
+      this.logger.warn('GOOGLE_GEMINI_API_KEY не найден, AI генерация будет работать через Orchestration');
     } else {
       this.genAI = new GoogleGenerativeAI(apiKey);
     }
   }
 
-  async generatePrompt(holidayData: HolidayPromptData): Promise<string> {
+  async generatePrompt(imageData: HolidayImageData): Promise<string> {
     try {
-      const apiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
-      if (!apiKey) {
-        throw new Error('API ключ Google Gemini не настроен');
-      }
-
-      const model = this.genAI.getGenerativeModel(
-          { model: 'gemini-2.5-flash' },
-          { apiVersion: 'v1beta' }
+      // Используем AI Orchestration для генерации промпта
+      const result = await this.aiOrchestrationService.generateImagePrompt(
+        imageData.name,
+        imageData.style || GreetingStyle.FRIENDLY,
+        imageData.language || GreetingLanguage.RUSSIAN
       );
 
-      const style = holidayData.style || GreetingStyle.FRIENDLY;
-      const language = holidayData.language || GreetingLanguage.RUSSIAN;
-      const recipientInfo = holidayData.recipientInfo || {};
+      this.logger.log(`✅ AI Orchestration промпт: ${result.provider} (${result.reasoning})`);
+      return result.prompt;
 
-      const stylePrompts = {
-        [GreetingStyle.OFFICIAL]: 'официальный стиль, строгие цвета, деловая атмосфера, элегантность, сдержанность',
-        [GreetingStyle.FUNNY]: 'веселый стиль, яркие сочные цвета, смешные элементы, праздничный юмор, анимация',
-        [GreetingStyle.POETIC]: 'поэтический стиль, нежные пастельные тона, цветы, романтика, мечтательная атмосфера',
-        [GreetingStyle.FRIENDLY]: 'дружеский стиль, теплые уютные цвета, позитив, дружба, счастливые моменты',
-        [GreetingStyle.ROMANTIC]: 'романтичный стиль, розовые и красные тона, сердца, свечи, нежность, любовь'
-      };
-
-      const basePrompts = {
-        '8 марта': {
-          [GreetingStyle.OFFICIAL]: 'официальный плакат с 8 марта, строгие цветы делового стиля, элегантные розы, сдержанная палитра',
-          [GreetingStyle.FUNNY]: 'веселый плакат с 8 марта, яркие смешные цветы, шутливые элементы, праздничные шары, мультяшные персонажи',
-          [GreetingStyle.POETIC]: 'поэтический плакат с 8 марта, нежные весенние цветы, пастельные тона, романтичные сцены, мечтательная атмосфера',
-          [GreetingStyle.FRIENDLY]: 'дружеский плакат с 8 марта, теплые цветы, уютная атмосфера, счастливые женщины, позитивные эмоции',
-          [GreetingStyle.ROMANTIC]: 'романтичный плакат с 8 марта, красивые розы, сердца, нежные тона, романтические сцены, свечи'
-        },
-        'День рождения': {
-          [GreetingStyle.OFFICIAL]: 'официальный праздничный плакат, торжественный торт, элегантные свечи, сдержанные цвета, деловой стиль',
-          [GreetingStyle.FUNNY]: 'веселый день рождения, смешной торт, яркие шары, забавные подарки, юмористические элементы, карнавал',
-          [GreetingStyle.POETIC]: 'поэтический день рождения, красивые цветы, нежные свечи, мечтательная атмосфера, романтичные детали',
-          [GreetingStyle.FRIENDLY]: 'дружеский день рождения, уютный торт, теплые цвета, счастливые моменты, позитивная атмосфера',
-          [GreetingStyle.ROMANTIC]: 'романтичный день рождения, свечи, розы, сердца, нежные тона, интимная обстановка, любовь'
-        },
-        'Новый год': {
-          [GreetingStyle.OFFICIAL]: 'официальный новогодний плакат, элегантная елка, сдержанные украшения, деловой стиль, торжественность',
-          [GreetingStyle.FUNNY]: 'веселый Новый год, смешной Дед Мороз, яркие подарки, шутливые снежинки, праздничный юмор',
-          [GreetingStyle.POETIC]: 'поэтический Новый год, волшебный снег, мечтательные сцены, романтическая зима, сказочная атмосфера',
-          [GreetingStyle.FRIENDLY]: 'дружеский Новый год, уютная елка, теплые огни, семейное счастье, позитивные эмоции',
-          [GreetingStyle.ROMANTIC]: 'романтичный Новый год, свечи, снег, нежные моменты, зимняя романтика, любовь под снегом'
-        }
-      };
-
-      const languagePrompts = {
-        [GreetingLanguage.RUSSIAN]: 'Создай промпт на русском языке',
-        [GreetingLanguage.UKRAINIAN]: 'Створи промпт українською мовою',
-        [GreetingLanguage.ENGLISH]: 'Create prompt in English language'
-      };
-
-      const basePrompt = holidayData.customPrompt ||
-          basePrompts[holidayData.name]?.[style] ||
-          stylePrompts[style] + ', праздничная тема';
-
-      const recipientText = holidayData.recipientName
-          ? ` с персонализацией для ${holidayData.recipientName}`
-          : '';
-      
-      const genderText = recipientInfo.gender
-          ? recipientInfo.gender === 'female' ? ' для женщины' : ' для мужчины'
-          : '';
-
-      const fullPrompt = `
-${languagePrompts[language]}
-
-Создай детальный промпт для генерации праздничного изображения в стиле Stable Diffusion:
-
-${basePrompt}${recipientText}${genderText}
-
-Художественный стиль: ${stylePrompts[style]}
-
-Требования к промпту:
-- Яркий, красочный дизайн соответствующий стилю
-- Праздничная атмосфера  
-- Высокое качество, детализация
-- Позитивные эмоции
-- Без текста на изображении (только визуальные элементы)
-- Стиль: digital art, high resolution, vibrant colors
-- Размер: 512x512 пикселей
-- Уникальная композиция
-
-Ответь только промптом для генерации изображения, без лишнего текста.
-Пример хорошего ответа: "beautiful spring flowers, International Women's Day, pink and purple colors, festive atmosphere, high quality, detailed"
-      `.trim();
-
-      const result = await model.generateContent(fullPrompt);
-      const prompt = result.response.text().trim();
-
-      this.logger.log(`Сгенерирован промпт: ${holidayData.name} (${style}, ${language})`);
-      return prompt;
     } catch (error) {
-      this.logger.error('Ошибка генерации промпта:', error);
-      throw error;
+      this.logger.error('❌ Ошибка генерации промпта:', error.message);
+      return this.getDefaultPrompt(imageData);
     }
-  }
-
-  getFallbackPrompt(holidayData: HolidayPromptData): string {
-    const recipientText = holidayData.recipientName
-        ? ` with personalized greeting for ${holidayData.recipientName}`
-        : '';
-
-    const fallbacks = {
-      '8 марта': `beautiful spring flowers, International Women\'s Day, pink and purple colors, festive atmosphere, high quality, detailed${recipientText}`,
-      'Рождество': `Christmas tree, snow, winter wonderland, festive lights, warm colors, magical atmosphere, high quality${recipientText}`,
-      'День рождения': `birthday cake with candles, colorful balloons, celebration, festive atmosphere, bright colors, high quality${recipientText}`,
-      'Новый год': `New Year celebration, Christmas tree, gifts, snowflakes, festive atmosphere, high quality, detailed${recipientText}`,
-      'Пасха': `Easter celebration, decorated eggs, spring flowers, bright colors, festive atmosphere, high quality${recipientText}`,
-    };
-
-    return fallbacks[holidayData.name] ||
-        `festive celebration, colorful design, high quality, detailed image${recipientText}`;
   }
 
   async generateGreetingText(holidayData: HolidayPromptData): Promise<string> {
@@ -186,30 +99,6 @@ ${basePrompt}${recipientText}${genderText}
   }
 
   /**
-   * Fallback на Groq если Gemini превысил лимит
-   */
-  private async tryGroqFallback(holidayData: HolidayPromptData): Promise<string> {
-    try {
-      const recipientName = holidayData.recipientName || 'друг';
-      const holiday = holidayData.name;
-      const style = holidayData.style || GreetingStyle.FRIENDLY;
-      
-      const text = await this.groqService.generateGreetingText(
-        recipientName,
-        holiday,
-        style,
-        'russian'
-      );
-      
-      this.logger.log(`✅ Groq сгенерировал текст поздравления (${style}): ${holiday}`);
-      return text;
-    } catch (error) {
-      this.logger.error('❌ Groq fallback тоже не сработал:', error.message);
-      return this.getFallbackGreetingText(holidayData);
-    }
-  }
-
-  /**
    * Автоматический выбор случайного стиля поздравления
    */
   getRandomStyle(): GreetingStyle {
@@ -227,57 +116,124 @@ ${basePrompt}${recipientText}${genderText}
       return womenStyles[Math.floor(Math.random() * womenStyles.length)];
     }
 
-    // Для официальных праздников
-    if (holidayName === 'Новый год' || holidayName === 'Рождество') {
-      const holidayStyles = [GreetingStyle.FRIENDLY, GreetingStyle.OFFICIAL, GreetingStyle.POETIC];
-      return holidayStyles[Math.floor(Math.random() * holidayStyles.length)];
+    // Для мужчин чаще официальный стиль
+    if (recipientInfo?.gender === 'male') {
+      const menStyles = [GreetingStyle.OFFICIAL, GreetingStyle.FRIENDLY, GreetingStyle.POETIC];
+      return menStyles[Math.floor(Math.random() * menStyles.length)];
     }
 
-    // Для дней рождения - учитываем только пол
-    if (holidayName === 'День рождения') {
-      if (recipientInfo?.gender === 'female') {
-        // Для женщин более нежные стили
-        const womenStyles = [GreetingStyle.POETIC, GreetingStyle.ROMANTIC, GreetingStyle.FRIENDLY, GreetingStyle.FUNNY];
-        return womenStyles[Math.floor(Math.random() * womenStyles.length)];
-      }
-      
-      // Для мужчин и по умолчанию
-      const styles = [GreetingStyle.FRIENDLY, GreetingStyle.FUNNY, GreetingStyle.OFFICIAL, GreetingStyle.POETIC];
-      return styles[Math.floor(Math.random() * styles.length)];
+    // Для женщин чаще нежные стили
+    if (recipientInfo?.gender === 'female') {
+      const womenStyles = [GreetingStyle.POETIC, GreetingStyle.ROMANTIC, GreetingStyle.FRIENDLY];
+      return womenStyles[Math.floor(Math.random() * womenStyles.length)];
+    }
+
+    // Для Нового года более официальные стили
+    if (holidayName === 'Новый год') {
+      const newYearStyles = [GreetingStyle.OFFICIAL, GreetingStyle.POETIC, GreetingStyle.FRIENDLY];
+      return newYearStyles[Math.floor(Math.random() * newYearStyles.length)];
     }
 
     // По умолчанию случайный стиль
     return this.getRandomStyle();
   }
 
-  getFallbackGreetingText(holidayData: HolidayPromptData): string {
-    const greetings = {
-      '8 марта': `🌸 С 8 марта! Желаю весеннего настроения, красоты и счастья! 🌷`,
-      'Рождество': `🎄 С Рождеством! Пусть волшебство этого дня принесет радость и чудеса! 🌟`,
-      'День рождения': `🎂 С днем рождения! Пусть все мечты сбываются! 🎉`,
-      'Новый год': `🎊 С Новым годом! Пусть наступающий год принесет счастье и успех! 🎆`,
-      'Пасха': `🐣 С Христовым Воскресением! Пусть светлая Пасха принесет радость и мир! ✨`,
+  /**
+   * Получение промпта по умолчанию для генерации изображения (private)
+   */
+  private getDefaultPrompt(imageData: HolidayImageData): string {
+    const recipientText = imageData.recipientInfo 
+      ? ` for ${imageData.recipientInfo.age || 'adult'} year old ${imageData.recipientInfo.gender || 'person'}`
+      : '';
+
+    const fallbacks = {
+      'День рождения': `festive birthday celebration, colorful balloons, cake, gifts, warm lighting, high quality, detailed${recipientText}`,
+      '8 марта': `international women day celebration, spring flowers, elegant bouquet, soft lighting, professional photography, high quality${recipientText}`,
+      'Новый год': `New Year celebration, Christmas tree, gifts, snowflakes, festive atmosphere, high quality, detailed${recipientText}`,
+      'Пасха': `Easter celebration, decorated eggs, spring flowers, bright colors, festive atmosphere, high quality${recipientText}`,
     };
 
-    return greetings[holidayData.name] ||
-        `🎉 Поздравляю с ${holidayData.name}! Желаю счастья и радости! 🌟`;
+    return fallbacks[imageData.name] ||
+        `festive celebration, colorful design, high quality, detailed image${recipientText}`;
   }
 
-  // ✅ Исправлено: gemini-pro → gemini-1.5-flash
-  async isAiAvailable(): Promise<boolean> {
-    try {
-      const apiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
-      if (!apiKey) return false;
+  /**
+   * Получение заглушки для текста поздравления (private)
+   */
+  private getFallbackGreetingText(holidayData: HolidayPromptData): string {
+    const recipientName = holidayData.recipientName || 'друг';
+    const holiday = holidayData.name || 'праздник';
+    const style = holidayData.style || GreetingStyle.FRIENDLY;
 
-      const model = this.genAI.getGenerativeModel(
-          { model: 'gemini-2.5-flash' },
-          { apiVersion: 'v1beta' }
-      );
-      await model.generateContent('test');
-      return true;
+    const fallbackTexts = {
+      [GreetingStyle.FRIENDLY]: `🎉 Поздравляю с ${holiday}, ${recipientName}! Желаю тебе огромного счастья, крепкого здоровья и исполнения всех желаний! Пусть каждый день будет наполнен радостью и улыбками! ✨`,
+      [GreetingStyle.OFFICIAL]: `🎊 Уважаемый(ая) ${recipientName}! Примите мои искренние поздравления с ${holiday}! Желаю Вам профессиональных успехов, личного благополучия и дальнейших процветаний! С уважением, 🌹`,
+      [GreetingStyle.FUNNY]: `🎈 С ${holiday}, ${recipientName}! Желаю тебе чтобы жизнь была как яркий карнавал - полный веселья, сюрпризов и чтобы печень всегда была сладкой! А еще чтобы деньги водились, а проблемы исчезали сами собой! 😄🎊`,
+      [GreetingStyle.POETIC]: `🌸 В этот прекрасный день ${holiday}, ${recipientName}! Пусть твоя жизнь будет как весенний сад - расцветает с каждым днем, наполнена светом, теплом и гармонией! Желаю чтобы мечты сбывались, а сердце было наполнено любовью! 🌺✨`,
+      [GreetingStyle.ROMANTIC]: `💕 Дорогой(ая) ${recipientName}! В этот волшебный день ${holiday} хочу пожелать тебе бесконечного счастья, нежности и тепла! Пусть каждый миг будет наполнен любовью, а в глазах всегда горит огонь страсти! Обнимаю крепко! 💝`
+    };
+
+    return fallbackTexts[style] || fallbackTexts[GreetingStyle.FRIENDLY];
+  }
+
+  /**
+   * Получение заглушки для текста поздравления (public)
+   */
+  getFallbackGreetingTextPublic(holidayData: HolidayPromptData): string {
+    return this.getFallbackGreetingText(holidayData);
+  }
+
+  /**
+   * Получение промпта по умолчанию для генерации изображения (public)
+   */
+  getFallbackPromptPublic(imageData: HolidayImageData): string {
+    return this.getDefaultPrompt(imageData);
+  }
+
+  /**
+   * Проверка доступности AI сервисов
+   */
+  async checkAiAvailability(): Promise<{ ai: boolean; image: boolean }> {
+    try {
+      const groqKey = this.configService.get<string>('GROQ_API_KEY');
+      const geminiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
+      
+      return {
+        ai: !!(groqKey || geminiKey),
+        image: !!groqKey // Groq используется для промптов изображений
+      };
     } catch (error) {
-      this.logger.warn('AI сервис недоступен:', error.message);
-      return false;
+      this.logger.error('Ошибка проверки доступности AI:', error);
+      return { ai: false, image: false };
     }
+  }
+
+  /**
+   * Проверка доступности AI (public alias)
+   */
+  async isAiAvailable(): Promise<boolean> {
+    const availability = await this.checkAiAvailability();
+    return availability.ai;
+  }
+
+  /**
+   * Получение статистики использования AI
+   */
+  getAiStats() {
+    return this.aiOrchestrationService.getUsageStats();
+  }
+
+  /**
+   * Сброс дневных лимитов
+   */
+  resetDailyLimits() {
+    this.aiOrchestrationService.resetDailyLimits();
+  }
+
+  /**
+   * Очистка кэша промптов
+   */
+  clearPromptCache() {
+    return this.groqService.clearPromptCache();
   }
 }

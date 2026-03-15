@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GroqService } from './groq.service';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GreetingStyle, GreetingLanguage, HolidayPromptData } from './ai.service';
 
 export interface AIProvider {
@@ -11,6 +12,7 @@ export interface AIProvider {
   isAvailable: boolean;
   reasoning?: string;
   generateText(prompt: string, options: any): Promise<string>;
+  generateImagePrompt?(holiday: string, style: string, language: string): Promise<string>;
 }
 
 export interface AIOrchestrationOptions {
@@ -39,24 +41,26 @@ export class AiOrchestrationService {
    * Инициализация провайдеров AI
    */
   private initializeProviders() {
-    // Groq - высокий приоритет, большой лимит
+    // Groq - высокий приоритет, основной провайдер
     this.providers.set('groq', {
       name: 'groq',
       priority: 1,
       dailyLimit: 14400,
       currentUsage: 0,
       isAvailable: !!this.configService.get<string>('GROQ_API_KEY'),
-      generateText: this.generateWithGroq.bind(this)
+      generateText: this.generateWithGroq.bind(this),
+      generateImagePrompt: this.generateImagePromptWithGroq.bind(this)
     });
 
-    // Gemini - средний приоритет, маленький лимит
+    // Gemini - низкий приоритет, запасной провайдер
     this.providers.set('gemini', {
       name: 'gemini',
       priority: 2,
       dailyLimit: 20,
       currentUsage: 0,
       isAvailable: !!this.configService.get<string>('GOOGLE_GEMINI_API_KEY'),
-      generateText: this.generateWithGemini.bind(this)
+      generateText: this.generateWithGemini.bind(this),
+      generateImagePrompt: this.generateImagePromptWithGemini.bind(this)
     });
   }
 
@@ -103,6 +107,56 @@ export class AiOrchestrationService {
   }
 
   /**
+   * Умная генерация промпта для изображения
+   */
+  async generateImagePrompt(
+    holiday: string,
+    style: string = 'friendly',
+    language: string = 'russian'
+  ): Promise<{ prompt: string; provider: string; reasoning: string }> {
+    const startTime = Date.now();
+    
+    try {
+      // 1. Пробуем Groq (основной провайдер)
+      const groqProvider = this.providers.get('groq');
+      if (groqProvider?.isAvailable && groqProvider.generateImagePrompt) {
+        try {
+          const prompt = await groqProvider.generateImagePrompt(holiday, style, language);
+          this.updateUsageStats('groq', true, Date.now() - startTime);
+          
+          return {
+            prompt,
+            provider: 'groq',
+            reasoning: 'Основной провайдер, кэшированные промпты'
+          };
+        } catch (error) {
+          this.logger.warn('❌ Groq не смог сгенерировать промпт:', error.message);
+        }
+      }
+
+      // 2. Fallback на статичные промпты
+      this.updateUsageStats('fallback', true, Date.now() - startTime);
+      const fallbackPrompt = this.getStaticImagePrompt(holiday, style);
+      
+      return {
+        prompt: fallbackPrompt,
+        provider: 'fallback',
+        reasoning: 'Groq недоступен, использован статичный промпт'
+      };
+
+    } catch (error) {
+      this.logger.error('❌ Ошибка генерации промпта:', error.message);
+      this.updateUsageStats('error', true, Date.now() - startTime);
+      
+      return {
+        prompt: this.getStaticImagePrompt(holiday),
+        provider: 'error',
+        reasoning: 'Все методы недоступны'
+      };
+    }
+  }
+
+  /**
    * Анализ задачи для выбора оптимальной модели
    */
   private analyzeTask(holidayData: HolidayPromptData, options: AIOrchestrationOptions) {
@@ -135,9 +189,8 @@ export class AiOrchestrationService {
       .filter(p => p.isAvailable)
       .sort((a, b) => {
         // Факторы выбора:
-        // 1. Приоритет
+        // 1. Приоритет (Groq первый, Gemini второй)
         // 2. Текущая загрузка (usage/limit)
-        // 3. Последнее использование
         const aLoadRatio = a.currentUsage / a.dailyLimit;
         const bLoadRatio = b.currentUsage / b.dailyLimit;
         
@@ -192,10 +245,38 @@ export class AiOrchestrationService {
       
       return result;
     } catch (error) {
-      // Помечаем провайдер как недоступный при ошибке
+      // Обработка 429 ошибки с retry логикой
       if (error.message?.includes('429') || error.message?.includes('quota')) {
-        provider.isAvailable = false;
-        this.logger.warn(`🚫 Провайдер ${providerName} превысил лимит, отключен до следующего дня`);
+        // Извлекаем retryDelay из ответа
+        const retryDelay = this.extractRetryDelay(error.message);
+        
+        if (retryDelay && providerName === 'gemini') {
+          this.logger.warn(`🚫 ${providerName} превысил лимит, повтор через ${retryDelay}с`);
+          
+          // Ждем и пробуем еще раз
+          await this.sleep(retryDelay * 1000);
+          
+          // Вторая попытка
+          try {
+            const prompt = this.buildPrompt(holidayData, options);
+            const generateOptions = {
+              ...options,
+              recipientName: holidayData.recipientName,
+              holiday: holidayData.name
+            };
+            const result = await provider.generateText(prompt, generateOptions);
+            provider.currentUsage++;
+            return result;
+          } catch (retryError) {
+            // Если и вторая попытка не удалась, отключаем провайдер
+            provider.isAvailable = false;
+            this.logger.warn(`🚫 ${providerName} полностью недоступен до следующего дня`);
+            throw retryError;
+          }
+        } else {
+          provider.isAvailable = false;
+          this.logger.warn(`🚫 Провайдер ${providerName} превысил лимит, отключен до следующего дня`);
+        }
       }
       
       throw error;
@@ -219,11 +300,60 @@ export class AiOrchestrationService {
   }
 
   /**
-   * Генерация через Gemini (заглушка, будет реализована позже)
+   * Генерация промпта через Groq
+   */
+  private async generateImagePromptWithGroq(
+    holiday: string,
+    style: string,
+    language: string
+  ): Promise<string> {
+    return await this.groqService.generateImagePrompt(holiday, style, language);
+  }
+
+  /**
+   * Генерация через Gemini (с retry логикой)
    */
   private async generateWithGemini(prompt: string, options: AIOrchestrationOptions): Promise<string> {
-    // Здесь будет логика Gemini, но пока возвращаем ошибку
-    throw new Error('Gemini временно отключен в пользу Groq');
+    const apiKey = this.configService.get<string>('GOOGLE_GEMINI_API_KEY');
+    if (!apiKey) {
+      throw new Error('Gemini API ключ не настроен');
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel(
+      { model: 'gemini-2.5-flash' },
+      { apiVersion: 'v1beta' }
+    );
+
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim();
+  }
+
+  /**
+   * Генерация промпта через Gemini
+   */
+  private async generateImagePromptWithGemini(
+    holiday: string,
+    style: string,
+    language: string
+  ): Promise<string> {
+    // Заглушка - Gemini не используется для промптов
+    throw new Error('Gemini не используется для генерации промптов изображений');
+  }
+
+  /**
+   * Извлечение retry delay из ошибки
+   */
+  private extractRetryDelay(errorMessage: string): number | null {
+    const match = errorMessage.match(/Please retry in ([\d.]+)s/);
+    return match ? parseFloat(match[1]) : null;
+  }
+
+  /**
+   * Функция задержки
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
@@ -241,6 +371,37 @@ export class AiOrchestrationService {
     }
     
     return basePrompt;
+  }
+
+  /**
+   * Статичный промпт для изображения (fallback)
+   */
+  private getStaticImagePrompt(holiday: string, style: string = 'friendly'): string {
+    const staticPrompts = {
+      'День рождения': {
+        friendly: 'festive birthday celebration, colorful balloons, cake, gifts, warm lighting, professional photography, high quality, detailed',
+        official: 'elegant birthday celebration, formal setting, sophisticated decorations, premium photography style',
+        funny: 'fun birthday party, colorful confetti, playful atmosphere, vibrant colors, joyful mood',
+        poetic: 'romantic birthday scene, soft lighting, beautiful flowers, dreamy atmosphere, artistic style',
+        romantic: 'intimate birthday celebration, candlelight, roses, warm ambiance, romantic photography'
+      },
+      '8 марта': {
+        friendly: 'international women day celebration, spring flowers, pink and white colors, fresh bouquet, professional photography',
+        official: 'formal women day celebration, elegant flowers, sophisticated arrangement, corporate style',
+        funny: 'colorful women day party, bright spring colors, festive atmosphere, joyful celebration',
+        poetic: 'beautiful spring scene, blooming flowers, soft pastel colors, dreamy women day atmosphere',
+        romantic: 'romantic women day setting, red roses, candlelight, intimate celebration, elegant style'
+      },
+      'Новый год': {
+        friendly: 'festive new year celebration, christmas tree, fireworks, snow, warm lights, holiday atmosphere',
+        official: 'elegant new year celebration, sophisticated decorations, formal setting, premium style',
+        funny: 'fun new year party, colorful decorations, festive atmosphere, joyful celebration',
+        poetic: 'magical new year scene, snowflakes, winter wonderland, dreamy holiday atmosphere',
+        romantic: 'romantic new year celebration, candlelight, intimate setting, warm holiday ambiance'
+      }
+    };
+
+    return staticPrompts[holiday]?.[style] || staticPrompts[holiday]?.friendly || 'festive celebration, colorful design, high quality';
   }
 
   /**
@@ -331,5 +492,16 @@ export class AiOrchestrationService {
     });
     
     return predictions.sort((a, b) => a.hoursUntilExhaustion - b.hoursUntilExhaustion);
+  }
+
+  /**
+   * Получение статистики кэша промптов
+   */
+  getPromptCacheStats() {
+    const groqProvider = this.providers.get('groq');
+    if (groqProvider && 'getPromptCacheStats' in this.groqService) {
+      return (this.groqService as any).getPromptCacheStats();
+    }
+    return { size: 0, keys: [] };
   }
 }

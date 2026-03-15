@@ -1,82 +1,85 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import { GreetingStyle } from '../ai/ai.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface ApiImageData {
   name: string;
+  style?: string;
   recipientName?: string;
-  style?: GreetingStyle;
+  recipientInfo?: {
+    age?: number;
+    gender?: 'male' | 'female';
+    interests?: string[];
+  };
 }
 
 @Injectable()
 export class ApiImageService {
   private readonly logger = new Logger(ApiImageService.name);
-  private readonly usedImages = new Set<string>(); // Запоминаем использованные изображения
 
   constructor(private configService: ConfigService) {}
 
-  /**
-   * Получить случайное изображение через API сервис
-   */
-  async getRandomImage(imageData: ApiImageData): Promise<Buffer | null> {
+  async getRandomImage(imageData: ApiImageData): Promise<Buffer> {
+    this.logger.log(`🖼️ Генерация изображения для: ${imageData.name}`);
+
+    // 1. Пробуем Unsplash (random endpoint)
     try {
-      // Очищаем старые изображения если накопилось много (больше 100)
-      if (this.usedImages.size > 100) {
-        this.usedImages.clear();
-        this.logger.log('🗑️ Очищены старые использованные изображения');
-      }
-      
-      // 1. Unsplash API (бесплатные красивые изображения)
       const unsplashImage = await this.getFromUnsplash(imageData);
       if (unsplashImage) {
         this.logger.log('✅ Изображение получено через Unsplash');
         return unsplashImage;
       }
+    } catch (error) {
+      this.logger.warn('❌ Unsplash не сработал:', error.message);
+    }
 
-      // 2. Pexels API (бесплатные стоковые фото)
+    // 2. Пробуем Pexels (random page)
+    try {
       const pexelsImage = await this.getFromPexels(imageData);
       if (pexelsImage) {
         this.logger.log('✅ Изображение получено через Pexels');
         return pexelsImage;
       }
+    } catch (error) {
+      this.logger.warn('❌ Pexels не сработал:', error.message);
+    }
 
-      // 3. Pixabay API (бесплатные изображения)
+    // 3. Пробуем Pixabay (random page, случайный из 3)
+    try {
       const pixabayImage = await this.getFromPixabay(imageData);
       if (pixabayImage) {
         this.logger.log('✅ Изображение получено через Pixabay');
         return pixabayImage;
       }
-
-      return null;
     } catch (error) {
-      this.logger.error('❌ Ошибка получения изображения через API:', error);
-      return null;
+      this.logger.warn('❌ Pixabay не сработал:', error.message);
     }
+
+    throw new Error('Не удалось получить изображение ни через один из API');
   }
 
   /**
-   * Unsplash API - бесплатные качественные изображения
+   * Получение случайного изображения из Unsplash
    */
   private async getFromUnsplash(imageData: ApiImageData): Promise<Buffer | null> {
+    const accessKey = this.configService.get<string>('UNSPLASH_ACCESS_KEY');
+    if (!accessKey) {
+      this.logger.warn('UNSPLASH_ACCESS_KEY не настроен');
+      return null;
+    }
+
     try {
       const query = this.getSearchQuery(imageData);
-      const accessKey = this.configService.get<string>('UNSPLASH_ACCESS_KEY');
-      
-      if (!accessKey) {
-        this.logger.warn('UNSPLASH_ACCESS_KEY не настроен');
-        return null;
-      }
+      this.logger.log(`🔍 Unsplash случайный поиск: "${query}"`);
 
-      this.logger.log(`🔍 Unsplash поиск: "${query}"`);
-
-      const response = await axios.get('https://api.unsplash.com/search/photos', {
+      const response = await axios.get('https://api.unsplash.com/photos/random', {
         params: {
           query,
           orientation: 'squarish',
-          per_page: 10,
-          page: 1, // Всегда первая страница
-          content_filter: 'high'
+          content_filter: 'high',
+          count: 1
         },
         headers: {
           'Authorization': `Client-ID ${accessKey}`
@@ -84,116 +87,67 @@ export class ApiImageService {
         timeout: 10000
       });
 
-      this.logger.log(`📊 Unsplash статус: ${response.status}, найдено: ${response.data?.results?.length || 0} изображений`);
-
-      if (response.data?.results?.length > 0) {
-        // Фильтруем уже использованные изображения
-        const availableImages = response.data.results.filter(img => !this.usedImages.has(img.id));
-        
-        if (availableImages.length === 0) {
-          this.logger.warn('Все изображения из Unsplash использованы, пробуем другой API');
-          return null;
-        }
-        
-        // Выбираем случайное изображение из доступных
-        const randomImage = availableImages[Math.floor(Math.random() * availableImages.length)];
-        const imageUrl = randomImage.urls?.regular;
-        
-        // Запоминаем ID использованного изображения
-        this.usedImages.add(randomImage.id);
-        
-        this.logger.log(`✅ Unsplash выбрано изображение ID: ${randomImage.id}`);
-        
-        if (imageUrl) {
-          const imageResponse = await axios.get(imageUrl, {
-            responseType: 'arraybuffer',
-            timeout: 15000
-          });
-          return Buffer.from(imageResponse.data);
-        }
-      }
-
-      return null;
-    } catch (error) {
-      if (error.response?.status === 404) {
-        this.logger.error(`❌ Unsplash 404: Изображения не найдены по запросу, пробуем fallback`);
-        // Пробуем универсальный запрос
-        return this.tryUnsplashFallback(imageData);
-      } else if (error.response?.status === 401) {
-        this.logger.error('❌ Unsplash 401: Неверный API ключ');
-      } else if (error.response?.status === 403) {
-        this.logger.error('❌ Unsplash 403: Лимит API исчерпан');
-      } else {
-        this.logger.error(`❌ Unsplash API ошибка: ${error.message}`);
-      }
-      return null;
-    }
-  }
-
-  /**
-   * Fallback для Unsplash с универсальными запросами
-   */
-  private async tryUnsplashFallback(imageData: ApiImageData): Promise<Buffer | null> {
-    try {
-      const fallbackQueries = ['birthday', 'celebration', 'party', 'happy', 'festive'];
-      const randomQuery = fallbackQueries[Math.floor(Math.random() * fallbackQueries.length)];
-      
-      this.logger.log(`🔄 Unsplash fallback: "${randomQuery}"`);
-
-      const accessKey = this.configService.get<string>('UNSPLASH_ACCESS_KEY');
-      const response = await axios.get('https://api.unsplash.com/search', {
-        params: {
-          query: randomQuery,
-          orientation: 'squarish',
-          per_page: 5,
-          page: Math.floor(Math.random() * 50) + 1,
-          content_filter: 'high'
-        },
-        headers: {
-          'Authorization': `Client-ID ${accessKey}`
-        },
-        timeout: 10000
-      });
-
-      if (response.data?.results?.length > 0) {
-        const randomImage = response.data.results[Math.floor(Math.random() * response.data.results.length)];
-        const imageUrl = randomImage.urls?.regular;
-        
-        if (imageUrl) {
-          this.usedImages.add(randomImage.id);
-          const imageResponse = await axios.get(imageUrl, {
-            responseType: 'arraybuffer',
-            timeout: 15000
-          });
-          this.logger.log(`✅ Unsplash fallback успешен: ${randomImage.id}`);
-          return Buffer.from(imageResponse.data);
-        }
-      }
-    } catch (error) {
-      this.logger.error(`❌ Unsplash fallback тоже не сработал: ${error.message}`);
-    }
-    return null;
-  }
-
-  /**
-   * Pexels API - бесплатные стоковые фотографии
-   */
-  private async getFromPexels(imageData: ApiImageData): Promise<Buffer | null> {
-    try {
-      const query = this.getSearchQuery(imageData);
-      const apiKey = this.configService.get<string>('PEXELS_API_KEY');
-      
-      if (!apiKey) {
-        this.logger.warn('PEXELS_API_KEY не настроен');
+      if (response.status !== 200 || !response.data || response.data.length === 0) {
+        this.logger.warn(`Unsplash вернул пустой ответ: ${response.status}`);
         return null;
       }
+
+      const photo = response.data[0] || response.data;
+      if (!photo || !photo.urls) {
+        this.logger.warn('Unsplash: нет данных о фото');
+        return null;
+      }
+
+      const imageUrl = photo.urls.regular;
+      if (!imageUrl) {
+        this.logger.warn('Unsplash: нет URL изображения');
+        return null;
+      }
+
+      this.logger.log(`📊 Unsplash выбрано изображение ID: ${photo.id}`);
+
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+
+      return Buffer.from(imageResponse.data);
+
+    } catch (error) {
+      this.logger.error('Unsplash ошибка:', error.message);
+      if (error.response?.status === 401) {
+        this.logger.error('Unsplash: неверный API ключ');
+      } else if (error.response?.status === 403) {
+        this.logger.error('Unsplash: превышен лимит запросов');
+      } else if (error.response?.status === 404) {
+        this.logger.warn('Unsplash: изображения не найдены');
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Получение изображения из Pexels (случайная страница)
+   */
+  private async getFromPexels(imageData: ApiImageData): Promise<Buffer | null> {
+    const apiKey = this.configService.get<string>('PEXELS_API_KEY');
+    if (!apiKey) {
+      this.logger.warn('PEXELS_API_KEY не настроен');
+      return null;
+    }
+
+    try {
+      const query = this.getSearchQuery(imageData);
+      const randomPage = Math.floor(Math.random() * 100) + 1;
+      
+      this.logger.log(`🔍 Pexels поиск: "${query}" (страница: ${randomPage})`);
 
       const response = await axios.get('https://api.pexels.com/v1/search', {
         params: {
           query,
           orientation: 'square',
-          per_page: 20, // Запрашиваем 20 изображений для максимального разнообразия
-          page: Math.floor(Math.random() * 50) + 1 // Случайная страница из 50
+          per_page: 1,
+          page: randomPage
         },
         headers: {
           'Authorization': apiKey
@@ -201,50 +155,58 @@ export class ApiImageService {
         timeout: 10000
       });
 
-      if (response.data?.photos?.length > 0) {
-        // Фильтруем уже использованные изображения
-        const availablePhotos = response.data.photos.filter(photo => !this.usedImages.has(photo.id));
-        
-        if (availablePhotos.length === 0) {
-          this.logger.warn('Все изображения из Pexels использованы, пробуем другой API');
-          return null;
-        }
-        
-        // Выбираем случайное изображение из доступных
-        const randomPhoto = availablePhotos[Math.floor(Math.random() * availablePhotos.length)];
-        const imageUrl = randomPhoto.src?.large;
-        
-        // Запоминаем ID использованного изображения
-        this.usedImages.add(randomPhoto.id);
-        
-        if (imageUrl) {
-          const imageResponse = await axios.get(imageUrl, {
-            responseType: 'arraybuffer',
-            timeout: 15000
-          });
-          return Buffer.from(imageResponse.data);
-        }
+      if (response.status !== 200 || !response.data?.photos || response.data.photos.length === 0) {
+        this.logger.warn(`Pexels вернул пустой ответ: ${response.status}`);
+        return null;
       }
 
-      return null;
+      const photo = response.data.photos[0];
+      if (!photo || !photo.src) {
+        this.logger.warn('Pexels: нет данных о фото');
+        return null;
+      }
+
+      const imageUrl = photo.src.large;
+      if (!imageUrl) {
+        this.logger.warn('Pexels: нет URL изображения');
+        return null;
+      }
+
+      this.logger.log(`📊 Pexels выбрано изображение ID: ${photo.id}`);
+
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+
+      return Buffer.from(imageResponse.data);
+
     } catch (error) {
-      this.logger.warn('Pexels API ошибка:', error.message);
+      this.logger.error('Pexels ошибка:', error.message);
+      if (error.response?.status === 401) {
+        this.logger.error('Pexels: неверный API ключ');
+      } else if (error.response?.status === 429) {
+        this.logger.error('Pexels: превышен лимит запросов');
+      }
       return null;
     }
   }
 
   /**
-   * Pixabay API - бесплатные изображения
+   * Получение изображения из Pixabay (случайная страница, случайный из 3)
    */
   private async getFromPixabay(imageData: ApiImageData): Promise<Buffer | null> {
+    const apiKey = this.configService.get<string>('PIXABAY_API_KEY');
+    if (!apiKey) {
+      this.logger.warn('PIXABAY_API_KEY не настроен');
+      return null;
+    }
+
     try {
       const query = this.getSearchQuery(imageData);
-      const apiKey = this.configService.get<string>('PIXABAY_API_KEY');
+      const randomPage = Math.floor(Math.random() * 100) + 1;
       
-      if (!apiKey) {
-        this.logger.warn('PIXABAY_API_KEY не настроен');
-        return null;
-      }
+      this.logger.log(`🔍 Pixabay поиск: "${query}" (страница: ${randomPage})`);
 
       const response = await axios.get('https://pixabay.com/api/', {
         params: {
@@ -254,155 +216,89 @@ export class ApiImageService {
           orientation: 'vertical',
           category: 'celebrations',
           safesearch: true,
-          per_page: 30, // Увеличим до 30 для больше результатов
-          page: 1 // Всегда первая страница
+          per_page: 3,
+          page: randomPage
         },
         timeout: 10000
       });
 
-      if (response.data?.hits?.length > 0) {
-        // Фильтруем уже использованные изображения
-        const availableHits = response.data.hits.filter(hit => !this.usedImages.has(hit.id));
-        
-        if (availableHits.length === 0) {
-          this.logger.warn('Все изображения из Pixabay использованы, пробуем другой API');
-          return null;
-        }
-        
-        // Выбираем случайное изображение из доступных
-        const randomHit = availableHits[Math.floor(Math.random() * availableHits.length)];
-        const imageUrl = randomHit.largeImageURL;
-        
-        // Запоминаем ID использованного изображения
-        this.usedImages.add(randomHit.id);
-        
-        if (imageUrl) {
-          const imageResponse = await axios.get(imageUrl, {
-            responseType: 'arraybuffer',
-            timeout: 15000
-          });
-          return Buffer.from(imageResponse.data);
-        }
+      if (response.status !== 200 || !response.data?.hits || response.data.hits.length === 0) {
+        this.logger.warn(`Pixabay вернул пустой ответ: ${response.status}`);
+        return null;
       }
 
-      return null;
+      // Берем случайный из 3 результатов
+      const randomIndex = Math.floor(Math.random() * Math.min(3, response.data.hits.length));
+      const photo = response.data.hits[randomIndex];
+      
+      if (!photo || !photo.webformatURL) {
+        this.logger.warn('Pixabay: нет данных о фото');
+        return null;
+      }
+
+      const imageUrl = photo.webformatURL;
+      if (!imageUrl) {
+        this.logger.warn('Pixabay: нет URL изображения');
+        return null;
+      }
+
+      this.logger.log(`📊 Pixabay выбрано изображение ID: ${photo.id} (индекс: ${randomIndex})`);
+
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+
+      return Buffer.from(imageResponse.data);
+
     } catch (error) {
-      this.logger.warn('Pixabay API ошибка:', error.message);
+      this.logger.error('Pixabay ошибка:', error.message);
+      if (error.response?.status === 401) {
+        this.logger.error('Pixabay: неверный API ключ');
+      } else if (error.response?.status === 429) {
+        this.logger.error('Pixabay: превышен лимит запросов');
+      } else if (error.response?.status === 400) {
+        this.logger.warn('Pixabay: неверные параметры запроса');
+      }
       return null;
     }
   }
 
   /**
-   * Получить поисковый запрос на основе праздника и стиля
+   * Получение поискового запроса на основе праздника и стиля
    */
   private getSearchQuery(imageData: ApiImageData): string {
     const holiday = imageData.name;
-    const style = imageData.style || GreetingStyle.FRIENDLY;
-
-    // Универсальные простые запросы на английском
-    const universalQueries = [
-      'birthday celebration',
-      'party celebration', 
-      'happy birthday',
-      'celebration party',
-      'birthday cake',
-      'festive celebration',
-      'party decorations',
-      'birthday balloons',
-      'celebration confetti',
-      'happy celebration'
-    ];
-
-    // Простой fallback если ничего не найдено
-    const fallbackQueries = [
-      'celebration',
-      'party',
-      'happy',
-      'birthday',
-      'festive'
-    ];
+    const style = imageData.style || 'friendly';
 
     const queries = {
       'День рождения': {
-        [GreetingStyle.OFFICIAL]: [
-          'elegant birthday celebration',
-          'formal birthday party',
-          'sophisticated birthday cake'
-        ],
-        [GreetingStyle.FUNNY]: [
-          'fun birthday party',
-          'happy birthday balloons',
-          'birthday celebration fun'
-        ],
-        [GreetingStyle.POETIC]: [
-          'beautiful birthday',
-          'romantic birthday',
-          'dreamy birthday celebration'
-        ],
-        [GreetingStyle.FRIENDLY]: [
-          'happy birthday',
-          'birthday celebration',
-          'birthday party friends'
-        ],
-        [GreetingStyle.ROMANTIC]: [
-          'romantic birthday',
-          'intimate birthday',
-          'elegant birthday dinner'
-        ]
+        'friendly': ['happy birthday celebration', 'birthday party colorful', 'festive birthday decorations'],
+        'official': ['elegant birthday celebration', 'formal birthday party', 'sophisticated birthday event'],
+        'funny': ['funny birthday party', 'silly birthday celebration', 'humorous birthday decorations'],
+        'poetic': ['romantic birthday scene', 'dreamy birthday celebration', 'artistic birthday decorations'],
+        'romantic': ['romantic birthday dinner', 'intimate birthday celebration', 'candlelight birthday setting']
       },
       '8 марта': {
-        [GreetingStyle.OFFICIAL]: [
-          'international women day',
-          'women day flowers',
-          'formal women day'
-        ],
-        [GreetingStyle.FUNNY]: [
-          'women day celebration',
-          'happy women day',
-          'women day party'
-        ],
-        [GreetingStyle.POETIC]: [
-          'beautiful women day',
-          'romantic women day',
-          'women day spring flowers'
-        ],
-        [GreetingStyle.FRIENDLY]: [
-          'happy women day',
-          'women day celebration',
-          'women day spring'
-        ],
-        [GreetingStyle.ROMANTIC]: [
-          'romantic women day',
-          'women day roses',
-          'elegant women day'
-        ]
+        'friendly': ['international women day celebration', '8 march flowers', 'women day festive'],
+        'official': ['formal women day celebration', 'elegant 8 march event', 'professional women day'],
+        'funny': ['funny women day celebration', 'playful 8 march party', 'cheerful women day'],
+        'poetic': ['romantic women day scene', 'beautiful 8 march flowers', 'artistic women day celebration'],
+        'romantic': ['romantic women day flowers', 'intimate 8 march setting', 'elegant women day celebration']
       },
       'Новый год': {
-        [GreetingStyle.OFFICIAL]: [
-          'elegant new year',
-          'formal new year',
-          'sophisticated new year'
-        ],
-        [GreetingStyle.FUNNY]: [
-          'fun new year party',
-          'happy new year',
-          'new year celebration'
-        ],
-        [GreetingStyle.POETIC]: [
-          'magical new year',
-          'dreamy winter new year',
-          'romantic new year'
-        ],
-        [GreetingStyle.FRIENDLY]: [
-          'happy new year',
-          'new year celebration',
-          'new year family'
-        ],
-        [GreetingStyle.ROMANTIC]: [
-          'romantic new year',
-          'intimate new year',
-          'elegant new year dinner'
-        ]
+        'friendly': ['new year celebration', 'festive new year party', 'happy new year decorations'],
+        'official': ['formal new year celebration', 'elegant new year event', 'professional new year'],
+        'funny': ['funny new year party', 'playful new year celebration', 'cheerful new year'],
+        'poetic': ['magical new year scene', 'dreamy new year celebration', 'artistic new year decorations'],
+        'romantic': ['romantic new year setting', 'intimate new year celebration', 'cozy new year atmosphere']
+      },
+      'Пасха': {
+        'friendly': ['easter celebration', 'festive easter party', 'happy easter decorations'],
+        'official': ['formal easter celebration', 'elegant easter event', 'traditional easter'],
+        'funny': ['funny easter celebration', 'playful easter party', 'cheerful easter'],
+        'poetic': ['beautiful easter scene', 'dreamy easter celebration', 'artistic easter decorations'],
+        'romantic': ['romantic easter setting', 'intimate easter celebration', 'elegant easter atmosphere']
       }
     };
 
@@ -414,21 +310,13 @@ export class ApiImageService {
     }
 
     // 2. Fallback на универсальные запросы
+    const universalQueries = [
+      'celebration party festive',
+      'happy holiday celebration',
+      'festive decorations colorful',
+      'joyful celebration atmosphere'
+    ];
     const randomUniversal = universalQueries[Math.floor(Math.random() * universalQueries.length)];
     return randomUniversal;
-  }
-
-  /**
-   * Проверить доступность API сервисов
-   */
-  async checkApiAvailability(): Promise<{ unsplash: boolean; pexels: boolean; pixabay: boolean }> {
-    const result = {
-      unsplash: !!this.configService.get<string>('UNSPLASH_ACCESS_KEY'),
-      pexels: !!this.configService.get<string>('PEXELS_API_KEY'),
-      pixabay: !!this.configService.get<string>('PIXABAY_API_KEY')
-    };
-
-    this.logger.log('🔑 Статус API ключей:', result);
-    return result;
   }
 }

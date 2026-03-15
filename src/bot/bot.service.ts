@@ -811,7 +811,7 @@ ${predictions.map(p =>
         this.logger.log(`✅ AI промпт сгенерирован: ${prompt.substring(0, 100)}...`);
       } catch (error) {
         this.logger.warn('⚠️ AI генерация промпта не удалась, используем резервный');
-        prompt = this.aiService.getFallbackPrompt(holidayData);
+        prompt = this.aiService.getFallbackPromptPublic(holidayData);
       }
 
       // 2. Генерируем изображение
@@ -836,7 +836,7 @@ ${predictions.map(p =>
         this.logger.log('✅ Текст поздравления сгенерирован');
       } catch (error) {
         this.logger.warn('⚠️ AI генерация текста не удалась, используем резервный');
-        greetingText = this.aiService.getFallbackGreetingText(holidayData);
+        greetingText = this.aiService.getFallbackGreetingTextPublic(holidayData);
       }
 
       // Если есть получатели — добавляем их в начало подписи
@@ -871,8 +871,8 @@ ${predictions.map(p =>
 
   async testAiServices(): Promise<{ ai: boolean; image: boolean }> {
     try {
-      const aiAvailable = await this.aiService.isAiAvailable();
-
+      const availability = await this.aiService.checkAiAvailability();
+      
       let imageAvailable = false;
       try {
         const testImage = await this.imageService.generateImage({
@@ -884,7 +884,7 @@ ${predictions.map(p =>
         this.logger.warn('⚠️ Генерация изображений недоступна:', error.message);
       }
 
-      return { ai: aiAvailable, image: imageAvailable };
+      return { ai: availability.ai, image: imageAvailable };
     } catch (error) {
       this.logger.error('❌ Ошибка тестирования AI сервисов:', error);
       return { ai: false, image: false };
