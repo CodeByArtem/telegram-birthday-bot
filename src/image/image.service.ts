@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
 import { GreetingStyle } from '../ai/ai.service';
+import { ApiImageService } from './api-image.service';
 
 export interface HolidayImageData {
   name: string;
@@ -18,20 +19,33 @@ export class ImageService {
   private readonly logger = new Logger(ImageService.name);
   private readonly outputDir = './generated-images';
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private apiImageService: ApiImageService
+  ) {
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
   }
 
   /**
-   * Генерация изображения
+   * Генерация изображения с приоритетом на API сервисы
    */
   async generateImage(holidayData: HolidayImageData): Promise<Buffer> {
     try {
-      this.logger.log(`Генерация изображения для: ${holidayData.name}`);
+      this.logger.log(`🖼️ Генерация изображения для: ${holidayData.name}`);
 
-      // 1. StableHorde (бесплатно, стабильно)
+      // 1. Сначала пробуем API сервисы изображений
+      const apiImage = await this.apiImageService.getRandomImage(holidayData);
+      if (apiImage) {
+        this.logger.log('✅ Изображение получено через API сервис');
+        return this.saveImage(apiImage, holidayData.name);
+      }
+
+      // 2. Если API недоступны, используем AI генерацию
+      this.logger.log('🤖 API сервисы недоступны, используем AI генерацию');
+
+      // StableHorde (бесплатно, стабильно)
       try {
         const buf = await this.generateWithStableHorde(holidayData);
         if (buf) {
@@ -65,7 +79,7 @@ export class ImageService {
       }
 
       // 4. Заглушка
-      this.logger.warn('Все API недоступны, используем PNG-заглушку');
+      this.logger.warn('Все методы недоступны, используем PNG-заглушку');
       return this.getFallbackImage(holidayData);
 
     } catch (error) {
