@@ -19,6 +19,7 @@ export interface ApiImageData {
 export class ApiImageService {
   private readonly logger = new Logger(ApiImageService.name);
 
+
   constructor(private configService: ConfigService) {}
 
   async getRandomImage(imageData: ApiImageData): Promise<Buffer> {
@@ -65,46 +66,34 @@ export class ApiImageService {
    */
   private async getFromUnsplash(imageData: ApiImageData): Promise<Buffer | null> {
     const accessKey = this.configService.get<string>('UNSPLASH_ACCESS_KEY');
-    if (!accessKey) {
-      this.logger.warn('UNSPLASH_ACCESS_KEY не настроен');
-      return null;
-    }
+    if (!accessKey) return null;
 
     try {
       const query = this.getSearchQuery(imageData);
-      this.logger.log(`🔍 Unsplash случайный поиск: "${query}"`);
+      const randomPage = Math.floor(Math.random() * 5) + 1;
 
-      const response = await axios.get('https://api.unsplash.com/photos/random', {
+      this.logger.log(`🔍 Unsplash поиск: "${query}" (страница: ${randomPage})`);
+
+      const response = await axios.get('https://api.unsplash.com/search/photos', {
         params: {
           query,
+          per_page: 30,
+          page: randomPage,
           orientation: 'squarish',
-          content_filter: 'high',
-          count: 1
+          content_filter: 'high'
         },
-        headers: {
-          'Authorization': `Client-ID ${accessKey}`
-        },
+        headers: { 'Authorization': `Client-ID ${accessKey}` },
         timeout: 10000
       });
 
-      if (response.status !== 200 || !response.data || response.data.length === 0) {
-        this.logger.warn(`Unsplash вернул пустой ответ: ${response.status}`);
-        return null;
-      }
+      const results = response.data?.results;
+      if (!results || results.length === 0) return null;
 
-      const photo = response.data[0] || response.data;
-      if (!photo || !photo.urls) {
-        this.logger.warn('Unsplash: нет данных о фото');
-        return null;
-      }
+      const photo = results[Math.floor(Math.random() * results.length)];
+      const imageUrl = photo?.urls?.regular;
+      if (!imageUrl) return null;
 
-      const imageUrl = photo.urls.regular;
-      if (!imageUrl) {
-        this.logger.warn('Unsplash: нет URL изображения');
-        return null;
-      }
-
-      this.logger.log(`📊 Unsplash выбрано изображение ID: ${photo.id}`);
+      this.logger.log(`📊 Unsplash ID: ${photo.id}`);
 
       const imageResponse = await axios.get(imageUrl, {
         responseType: 'arraybuffer',
@@ -112,16 +101,8 @@ export class ApiImageService {
       });
 
       return Buffer.from(imageResponse.data);
-
     } catch (error) {
       this.logger.error('Unsplash ошибка:', error.message);
-      if (error.response?.status === 401) {
-        this.logger.error('Unsplash: неверный API ключ');
-      } else if (error.response?.status === 403) {
-        this.logger.error('Unsplash: превышен лимит запросов');
-      } else if (error.response?.status === 404) {
-        this.logger.warn('Unsplash: изображения не найдены');
-      }
       return null;
     }
   }
@@ -139,7 +120,7 @@ export class ApiImageService {
     try {
       const query = this.getSearchQuery(imageData);
       const randomPage = Math.floor(Math.random() * 100) + 1;
-      
+
       this.logger.log(`🔍 Pexels поиск: "${query}" (страница: ${randomPage})`);
 
       const response = await axios.get('https://api.pexels.com/v1/search', {
@@ -205,7 +186,7 @@ export class ApiImageService {
     try {
       const query = this.getSearchQuery(imageData);
       const randomPage = Math.floor(Math.random() * 100) + 1;
-      
+
       this.logger.log(`🔍 Pixabay поиск: "${query}" (страница: ${randomPage})`);
 
       const response = await axios.get('https://pixabay.com/api/', {
@@ -230,7 +211,7 @@ export class ApiImageService {
       // Берем случайный из 3 результатов
       const randomIndex = Math.floor(Math.random() * Math.min(3, response.data.hits.length));
       const photo = response.data.hits[randomIndex];
-      
+
       if (!photo || !photo.webformatURL) {
         this.logger.warn('Pixabay: нет данных о фото');
         return null;
