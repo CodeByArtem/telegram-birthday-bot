@@ -65,7 +65,7 @@ export class ApiImageService {
         params: {
           query,
           orientation: 'squarish',
-          count: 1,
+          count: 3, // Запрашиваем 3 изображения и выбираем случайное
           content_filter: 'high'
         },
         headers: {
@@ -75,7 +75,9 @@ export class ApiImageService {
       });
 
       if (response.data && response.data.length > 0) {
-        const imageUrl = response.data[0].urls?.regular;
+        // Выбираем случайное изображение из 3
+        const randomImage = response.data[Math.floor(Math.random() * response.data.length)];
+        const imageUrl = randomImage.urls?.regular;
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
@@ -109,7 +111,7 @@ export class ApiImageService {
         params: {
           query,
           orientation: 'square',
-          per_page: 1,
+          per_page: 5, // Запрашиваем 5 изображений и выбираем случайное
           page: Math.floor(Math.random() * 10) + 1
         },
         headers: {
@@ -119,7 +121,9 @@ export class ApiImageService {
       });
 
       if (response.data?.photos?.length > 0) {
-        const imageUrl = response.data.photos[0].src?.large;
+        // Выбираем случайное изображение из 5
+        const randomPhoto = response.data.photos[Math.floor(Math.random() * response.data.photos.length)];
+        const imageUrl = randomPhoto.src?.large;
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
@@ -164,7 +168,9 @@ export class ApiImageService {
       });
 
       if (response.data?.hits?.length > 0) {
-        const imageUrl = response.data.hits[0].largeImageURL;
+        // Выбираем случайное изображение из 3
+        const randomHit = response.data.hits[Math.floor(Math.random() * response.data.hits.length)];
+        const imageUrl = randomHit.largeImageURL;
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
@@ -190,29 +196,92 @@ export class ApiImageService {
 
     const queries = {
       'День рождения': {
-        [GreetingStyle.OFFICIAL]: 'elegant birthday celebration formal cake',
-        [GreetingStyle.FUNNY]: 'funny birthday party colorful balloons',
-        [GreetingStyle.POETIC]: 'beautiful birthday flowers romantic',
-        [GreetingStyle.FRIENDLY]: 'happy birthday celebration friends',
-        [GreetingStyle.ROMANTIC]: 'romantic birthday dinner candles'
+        [GreetingStyle.OFFICIAL]: [
+          'elegant birthday celebration formal cake',
+          'sophisticated birthday party luxury',
+          'formal birthday decorations premium'
+        ],
+        [GreetingStyle.FUNNY]: [
+          'joyful birthday party colorful balloons',
+          'funny birthday celebration confetti',
+          'happy birthday party decorations'
+        ],
+        [GreetingStyle.POETIC]: [
+          'dreamy birthday scene beautiful flowers',
+          'romantic birthday cake delicate roses',
+          'artistic watercolor birthday celebration'
+        ],
+        [GreetingStyle.FRIENDLY]: [
+          'warm birthday celebration cozy',
+          'cheerful birthday balloons streamers',
+          'happy birthday party friends'
+        ],
+        [GreetingStyle.ROMANTIC]: [
+          'romantic birthday dinner candles',
+          'intimate birthday celebration roses',
+          'elegant birthday setting romantic'
+        ]
       },
       '8 марта': {
-        [GreetingStyle.OFFICIAL]: 'international women day elegant flowers',
-        [GreetingStyle.FUNNY]: 'women day celebration colorful spring',
-        [GreetingStyle.POETIC]: 'beautiful spring flowers women day',
-        [GreetingStyle.FRIENDLY]: 'happy women day celebration',
-        [GreetingStyle.ROMANTIC]: 'romantic women day roses'
+        [GreetingStyle.OFFICIAL]: [
+          'international women day elegant flowers',
+          'formal women day celebration spring',
+          'professional women day flowers'
+        ],
+        [GreetingStyle.FUNNY]: [
+          'women day celebration colorful spring',
+          'funny women day party flowers',
+          'happy women day bright colors'
+        ],
+        [GreetingStyle.POETIC]: [
+          'beautiful spring flowers women day',
+          'romantic women day flowers',
+          'dreamy women day celebration'
+        ],
+        [GreetingStyle.FRIENDLY]: [
+          'happy women day celebration',
+          'warm women day flowers',
+          'cheerful women day spring'
+        ],
+        [GreetingStyle.ROMANTIC]: [
+          'romantic women day roses',
+          'intimate women day celebration',
+          'elegant women day flowers'
+        ]
       },
       'Новый год': {
-        [GreetingStyle.OFFICIAL]: 'elegant new year celebration formal',
-        [GreetingStyle.FUNNY]: 'funny new year party celebration',
-        [GreetingStyle.POETIC]: 'magical new year snow winter',
-        [GreetingStyle.FRIENDLY]: 'happy new year family celebration',
-        [GreetingStyle.ROMANTIC]: 'romantic new year candles'
+        [GreetingStyle.OFFICIAL]: [
+          'elegant new year celebration formal',
+          'luxury new year party champagne',
+          'sophisticated new year fireworks'
+        ],
+        [GreetingStyle.FUNNY]: [
+          'funny new year party celebration',
+          'colorful new year fireworks',
+          'happy new year party decorations'
+        ],
+        [GreetingStyle.POETIC]: [
+          'magical new year snow winter',
+          'dreamy winter snow landscape',
+          'romantic new year candles'
+        ],
+        [GreetingStyle.FRIENDLY]: [
+          'happy new year family celebration',
+          'warm new year party gathering',
+          'cheerful new year celebration'
+        ],
+        [GreetingStyle.ROMANTIC]: [
+          'romantic new year dinner candles',
+          'intimate new year celebration',
+          'elegant new year candles'
+        ]
       }
     };
 
-    return queries[holiday]?.[style] || 'celebration party festive';
+    const holidayQueries = queries[holiday]?.[style] || ['celebration party festive'];
+    const randomQuery = holidayQueries[Math.floor(Math.random() * holidayQueries.length)];
+    
+    return randomQuery;
   }
 
   /**
