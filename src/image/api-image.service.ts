@@ -12,6 +12,7 @@ export interface ApiImageData {
 @Injectable()
 export class ApiImageService {
   private readonly logger = new Logger(ApiImageService.name);
+  private readonly usedImages = new Set<string>(); // Запоминаем использованные изображения
 
   constructor(private configService: ConfigService) {}
 
@@ -20,6 +21,12 @@ export class ApiImageService {
    */
   async getRandomImage(imageData: ApiImageData): Promise<Buffer | null> {
     try {
+      // Очищаем старые изображения если накопилось много (больше 1000)
+      if (this.usedImages.size > 1000) {
+        this.usedImages.clear();
+        this.logger.log('🗑️ Очищены старые использованные изображения (1000+ использовано)');
+      }
+      
       // 1. Unsplash API (бесплатные красивые изображения)
       const unsplashImage = await this.getFromUnsplash(imageData);
       if (unsplashImage) {
@@ -61,11 +68,12 @@ export class ApiImageService {
         return null;
       }
 
-      const response = await axios.get('https://api.unsplash.com/photos/random', {
+      const response = await axios.get('https://api.unsplash.com/search', {
         params: {
           query,
           orientation: 'squarish',
-          count: 3, // Запрашиваем 3 изображения и выбираем случайное
+          per_page: 10, // Запрашиваем 10 изображений
+          page: Math.floor(Math.random() * 100) + 1, // Случайная страница из 100
           content_filter: 'high'
         },
         headers: {
@@ -74,10 +82,22 @@ export class ApiImageService {
         timeout: 10000
       });
 
-      if (response.data && response.data.length > 0) {
-        // Выбираем случайное изображение из 3
-        const randomImage = response.data[Math.floor(Math.random() * response.data.length)];
+      if (response.data?.results?.length > 0) {
+        // Фильтруем уже использованные изображения
+        const availableImages = response.data.results.filter(img => !this.usedImages.has(img.id));
+        
+        if (availableImages.length === 0) {
+          this.logger.warn('Все изображения из Unsplash использованы, пробуем другой API');
+          return null;
+        }
+        
+        // Выбираем случайное изображение из доступных
+        const randomImage = availableImages[Math.floor(Math.random() * availableImages.length)];
         const imageUrl = randomImage.urls?.regular;
+        
+        // Запоминаем ID использованного изображения
+        this.usedImages.add(randomImage.id);
+        
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
@@ -111,8 +131,8 @@ export class ApiImageService {
         params: {
           query,
           orientation: 'square',
-          per_page: 5, // Запрашиваем 5 изображений и выбираем случайное
-          page: Math.floor(Math.random() * 10) + 1
+          per_page: 20, // Запрашиваем 20 изображений для максимального разнообразия
+          page: Math.floor(Math.random() * 50) + 1 // Случайная страница из 50
         },
         headers: {
           'Authorization': apiKey
@@ -121,9 +141,21 @@ export class ApiImageService {
       });
 
       if (response.data?.photos?.length > 0) {
-        // Выбираем случайное изображение из 5
-        const randomPhoto = response.data.photos[Math.floor(Math.random() * response.data.photos.length)];
+        // Фильтруем уже использованные изображения
+        const availablePhotos = response.data.photos.filter(photo => !this.usedImages.has(photo.id));
+        
+        if (availablePhotos.length === 0) {
+          this.logger.warn('Все изображения из Pexels использованы, пробуем другой API');
+          return null;
+        }
+        
+        // Выбираем случайное изображение из доступных
+        const randomPhoto = availablePhotos[Math.floor(Math.random() * availablePhotos.length)];
         const imageUrl = randomPhoto.src?.large;
+        
+        // Запоминаем ID использованного изображения
+        this.usedImages.add(randomPhoto.id);
+        
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
@@ -161,16 +193,28 @@ export class ApiImageService {
           orientation: 'vertical',
           category: 'celebrations',
           safesearch: true,
-          per_page: 3,
-          page: Math.floor(Math.random() * 5) + 1
+          per_page: 20, // Запрашиваем 20 изображений для максимального разнообразия
+          page: Math.floor(Math.random() * 50) + 1 // Случайная страница из 50
         },
         timeout: 10000
       });
 
       if (response.data?.hits?.length > 0) {
-        // Выбираем случайное изображение из 3
-        const randomHit = response.data.hits[Math.floor(Math.random() * response.data.hits.length)];
+        // Фильтруем уже использованные изображения
+        const availableHits = response.data.hits.filter(hit => !this.usedImages.has(hit.id));
+        
+        if (availableHits.length === 0) {
+          this.logger.warn('Все изображения из Pixabay использованы, пробуем другой API');
+          return null;
+        }
+        
+        // Выбираем случайное изображение из доступных
+        const randomHit = availableHits[Math.floor(Math.random() * availableHits.length)];
         const imageUrl = randomHit.largeImageURL;
+        
+        // Запоминаем ID использованного изображения
+        this.usedImages.add(randomHit.id);
+        
         if (imageUrl) {
           const imageResponse = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
