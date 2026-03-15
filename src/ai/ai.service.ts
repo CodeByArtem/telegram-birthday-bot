@@ -116,7 +116,31 @@ export class AiService {
       return womenStyles[Math.floor(Math.random() * womenStyles.length)];
     }
 
-    // Для мужчин чаще официальный стиль
+    // Для Нового года более официальные стили
+    if (holidayName === 'Новый год') {
+      const newYearStyles = [GreetingStyle.OFFICIAL, GreetingStyle.POETIC, GreetingStyle.FRIENDLY];
+      return newYearStyles[Math.floor(Math.random() * newYearStyles.length)];
+    }
+
+    // Для дня рождения учитываем пол
+    if (holidayName === 'День рождения') {
+      // Для мужчин чаще официальный стиль
+      if (recipientInfo?.gender === 'male') {
+        const menStyles = [GreetingStyle.OFFICIAL, GreetingStyle.FRIENDLY, GreetingStyle.POETIC];
+        return menStyles[Math.floor(Math.random() * menStyles.length)];
+      }
+
+      // Для женщин чаще нежные стили
+      if (recipientInfo?.gender === 'female') {
+        const womenStyles = [GreetingStyle.POETIC, GreetingStyle.ROMANTIC, GreetingStyle.FRIENDLY];
+        return womenStyles[Math.floor(Math.random() * womenStyles.length)];
+      }
+
+      // Если пол не указан - случайный стиль
+      return this.getRandomStyle();
+    }
+
+    // Для других праздников учитываем пол если есть
     if (recipientInfo?.gender === 'male') {
       const menStyles = [GreetingStyle.OFFICIAL, GreetingStyle.FRIENDLY, GreetingStyle.POETIC];
       return menStyles[Math.floor(Math.random() * menStyles.length)];
@@ -126,12 +150,6 @@ export class AiService {
     if (recipientInfo?.gender === 'female') {
       const womenStyles = [GreetingStyle.POETIC, GreetingStyle.ROMANTIC, GreetingStyle.FRIENDLY];
       return womenStyles[Math.floor(Math.random() * womenStyles.length)];
-    }
-
-    // Для Нового года более официальные стили
-    if (holidayName === 'Новый год') {
-      const newYearStyles = [GreetingStyle.OFFICIAL, GreetingStyle.POETIC, GreetingStyle.FRIENDLY];
-      return newYearStyles[Math.floor(Math.random() * newYearStyles.length)];
     }
 
     // По умолчанию случайный стиль

@@ -268,8 +268,26 @@ export class ApiImageService {
    * Получение поискового запроса на основе праздника и стиля
    */
   private getSearchQuery(imageData: ApiImageData): string {
-    const holiday = imageData.name;
+    let holiday = imageData.name;
     const style = imageData.style || 'friendly';
+
+    this.logger.log(`🔍 getSearchQuery вызван: holiday="${holiday}", style="${style}"`);
+
+    // Нормализация названий праздников (поддержка сокращений)
+    const holidayAliases = {
+      'Н.Г': 'Новый год',
+      'НГ': 'Новый год',
+      'Новый год': 'Новый год',
+      '8 марта': '8 марта',
+      '8марта': '8 марта',
+      'День рождения': 'День рождения',
+      'Др': 'День рождения',
+      'Пасха': 'Пасха'
+    };
+
+    // Получаем нормализованное название
+    holiday = holidayAliases[holiday] || holiday;
+    this.logger.log(`🔄 Нормализовано: "${imageData.name}" → "${holiday}"`);
 
     const queries = {
       'День рождения': {
@@ -306,6 +324,7 @@ export class ApiImageService {
     const holidayQueries = queries[holiday]?.[style];
     if (holidayQueries && holidayQueries.length > 0) {
       const randomQuery = holidayQueries[Math.floor(Math.random() * holidayQueries.length)];
+      this.logger.log(`🎯 Запрос для "${imageData.name}" (стиль: "${style}"): "${randomQuery}"`);
       return randomQuery;
     }
 
@@ -317,6 +336,7 @@ export class ApiImageService {
       'joyful celebration atmosphere'
     ];
     const randomUniversal = universalQueries[Math.floor(Math.random() * universalQueries.length)];
+    this.logger.warn(`⚠️ Fallback запрос для "${imageData.name}" (стиль: "${style}"): "${randomUniversal}"`);
     return randomUniversal;
   }
 }

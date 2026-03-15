@@ -306,9 +306,15 @@ export class BotService implements OnModuleInit {
           return;
         }
 
+        const smartStyle = this.aiService.getSmartStyle('День рождения', {
+          gender: person.gender
+        });
+
         await this.sendAiGeneratedGreeting({
           name: 'День рождения',
-          recipientName: person.name
+          recipientName: person.telegramUsername ? `@${person.telegramUsername}` : person.name,
+          style: smartStyle,
+          recipientInfo: { gender: person.gender }
         });
         this.bot.sendMessage(chatId, `✅ AI поздравление с днем рождения для @${person.telegramUsername || person.name} отправлено!`);
       } catch (error) {
@@ -329,7 +335,12 @@ export class BotService implements OnModuleInit {
       const holidayName = match[1];
 
       try {
-        await this.sendAiGeneratedGreeting({ name: holidayName });
+        const smartStyle = this.aiService.getSmartStyle(holidayName);
+        
+        await this.sendAiGeneratedGreeting({ 
+          name: holidayName,
+          style: smartStyle
+        });
         this.bot.sendMessage(chatId, `✅ AI поздравление с ${holidayName} отправлено!`);
       } catch (error) {
         this.logger.error('Ошибка AI генерации:', error);
