@@ -10,18 +10,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host: 138.2.140.251
-          username: ubuntu
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 20m
-          script: |
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 138.2.140.251 >> ~/.ssh/known_hosts
+          
+          ssh -o StrictHostKeyChecking=no ubuntu@138.2.140.251 << 'EOF'
             cd /opt/telegram-birthday-bot
-            # Обновляем код (теперь git safe.directory прописан, sudo поможет)
             sudo git pull origin main
-            
-            # Используем docker compose (без дефиса)
-            # Это решит проблему с ContainerConfig
             sudo docker compose down
             sudo docker compose up -d --build
+          EOF
