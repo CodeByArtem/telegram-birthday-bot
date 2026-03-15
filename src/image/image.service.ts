@@ -231,15 +231,33 @@ export class ImageService {
   }
 
   /**
-   * Промпт по умолчанию
+   * Промпт по умолчанию - красивые промпты на английском для дней рождения
    */
   private getDefaultPrompt(holidayData: HolidayImageData): string {
-    const basePrompts = {
+    const style = holidayData.style || GreetingStyle.FRIENDLY;
+    
+    const birthdayPrompts = {
+      [GreetingStyle.OFFICIAL]: `elegant birthday celebration, sophisticated cake with golden candles, formal festive atmosphere, premium quality, refined colors, classic birthday decorations, professional photography style, high resolution, luxury celebration`,
+      [GreetingStyle.FUNNY]: `joyful birthday party celebration, colorful confetti and balloons, fun birthday cake with sparklers, vibrant festive atmosphere, playful cartoon style, bright cheerful colors, happy birthday decorations, high quality, exciting party mood`,
+      [GreetingStyle.POETIC]: `dreamy birthday scene, beautiful floral arrangement with soft pastel colors, romantic birthday cake with delicate roses, ethereal magical atmosphere, artistic watercolor style, gentle lighting, poetic birthday celebration, high resolution, elegant and graceful`,
+      [GreetingStyle.FRIENDLY]: `warm birthday celebration, cozy birthday cake with vanilla frosting, cheerful balloons and streamers, friendly festive atmosphere, soft warm lighting, comfortable birthday party setting, high quality, heartwarming celebration mood`,
+      [GreetingStyle.ROMANTIC]: `romantic birthday dinner, elegant cake with rose petals and candles, intimate celebration atmosphere, soft pink and gold color palette, romantic lighting with fairy lights, sophisticated birthday setting, high resolution, passionate and loving mood`
+    };
+
+    const otherPrompts = {
       '8 марта': `beautiful spring flowers, International Women's Day, pink and purple colors, festive atmosphere, high quality, detailed`,
       'Рождество': `Christmas tree, snow, winter wonderland, festive lights, warm colors, magical atmosphere, high quality`,
-      'День рождения': `birthday cake with candles, colorful balloons, celebration, festive atmosphere, bright colors, high quality`,
+      'Новый год': `New Year celebration, fireworks, champagne glasses, festive atmosphere, golden colors, high quality, detailed`,
+      'Пасха': `Easter celebration, decorated eggs, spring flowers, bright colors, festive atmosphere, high quality`
     };
-    return basePrompts[holidayData.name] || `festive celebration, colorful design, high quality, detailed image`;
+
+    // Для дня рождения используем улучшенные промпты в зависимости от стиля
+    if (holidayData.name === 'День рождения') {
+      return birthdayPrompts[style] || birthdayPrompts[GreetingStyle.FRIENDLY];
+    }
+
+    // Для других праздников используем базовые промпты
+    return otherPrompts[holidayData.name] || `festive celebration, colorful design, high quality, detailed image`;
   }
 
   /**
