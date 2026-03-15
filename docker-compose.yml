@@ -3,8 +3,11 @@ services:
     build: .
     container_name: telegram-birthday-bot
     restart: unless-stopped
+    # Это заставит Docker искать переменные в файле .env на сервере
+    env_file:
+      - .env
     environment:
-    - NODE_ENV=production
+      - NODE_ENV=production
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - ADMIN_USERNAMES=${ADMIN_USERNAMES}
