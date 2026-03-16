@@ -5,19 +5,41 @@ on:
     branches: [ main ]
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Deploy via SSH
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ✅ Собираем образ на GitHub — не на сервере
+      - name: Build Docker image
+        run: docker build -t telegram-birthday-bot .
+
+      - name: Save Docker image
+        run: docker save telegram-birthday-bot | gzip > bot.tar.gz
+
+      # ✅ Копируем готовый образ на сервер
+      - name: Copy image to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 138.2.140.251
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: bot.tar.gz
+          target: /opt/telegram-birthday-bot/
+
+      # ✅ На сервере просто загружаем и запускаем
+      - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: 138.2.140.251
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 20m
+          command_timeout: 5m
           script: |
             cd /opt/telegram-birthday-bot
-            sudo git pull origin main
+            sudo docker load < bot.tar.gz
             sudo docker compose down
-            sudo docker compose up -d --build
+            sudo docker compose up -d
+            rm bot.tar.gz
