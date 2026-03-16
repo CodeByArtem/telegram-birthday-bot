@@ -12,14 +12,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ✅ Собираем образ на GitHub — не на сервере
+      # 1. Собираем образ
       - name: Build Docker image
         run: docker build -t telegram-birthday-bot .
 
+      # 2. Сохраняем в архив (gzip для скорости передачи)
       - name: Save Docker image
         run: docker save telegram-birthday-bot | gzip > bot.tar.gz
 
-      # ✅ Копируем готовый образ на сервер
+      # 3. Копируем на сервер
       - name: Copy image to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -29,17 +30,21 @@ jobs:
           source: bot.tar.gz
           target: /opt/telegram-birthday-bot/
 
-      # ✅ На сервере просто загружаем и запускаем
+      # 4. Развертывание
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: 138.2.140.251
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          command_timeout: 5m
+          command_timeout: 10m
           script: |
             cd /opt/telegram-birthday-bot
+            # Загружаем новый образ
             sudo docker load < bot.tar.gz
+            # Перезапускаем контейнеры
             sudo docker compose down
             sudo docker compose up -d
+            # Очистка: удаляем архив и старые неиспользуемые образы (важно для места на диске)
             rm bot.tar.gz
+            sudo docker image prune -f
